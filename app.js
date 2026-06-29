@@ -1,3 +1,13 @@
+// ★デバッグ用：画面の裏で起きた致命的なエラーを強制的に表示する
+window.addEventListener('error', (event) => {
+    document.getElementById('debug-info').innerText = `【エラー発生】${event.message}`;
+    document.getElementById('debug-info').style.color = "#ff4444";
+});
+window.addEventListener('unhandledrejection', (event) => {
+    document.getElementById('debug-info').innerText = `【通信エラー】${event.reason}`;
+    document.getElementById('debug-info').style.color = "#ff4444";
+});
+
 // 最新のMediaPipeをモジュールとしてインポート
 import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js";
 
@@ -10,19 +20,27 @@ let gestureRecognizer;
 let lastVideoTime = -1;
 let gestureHistory = [];
 
-function logStatus(message, isError = false) {
-    debugInfo.innerText = message;
+// パーセンテージを受け取って画面に表示するように関数を改良
+function logStatus(message, percent = null, isError = false) {
+    if (percent !== null) {
+        debugInfo.innerText = `[${percent}%] ${message}`;
+    } else {
+        debugInfo.innerText = message;
+    }
     debugInfo.style.color = isError ? "#ff4444" : "#00ff00";
     console.log(message);
 }
 
 // 1. AIとライブラリの初期化
 async function initARSystem() {
-    logStatus("AIモデルをダウンロード中...");
+    // スクリプトが正常に動き始めた証明
+    logStatus("JS起動完了。WASMエンジンを要求中...", 10);
+    
     try {
         const vision = await FilesetResolver.forVisionTasks(
             "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
         );
+        logStatus("エンジン準備完了。AIモデル本体をダウンロード中...", 50);
 
         gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
             baseOptions: {
@@ -31,12 +49,12 @@ async function initARSystem() {
             },
             runningMode: "VIDEO"
         });
-
-        logStatus("準備完了！スタートボタンを押してください。");
+        
+        logStatus("準備完了！スタートボタンを押してください。", 100);
         startBtn.addEventListener('click', startCamera);
 
     } catch (error) {
-        logStatus(`初期化エラー: ${error.message}`, true);
+        logStatus(`初期化エラー: ${error.message}`, null, true);
         console.error(error);
     }
 }
@@ -66,7 +84,7 @@ async function startCamera() {
         }, 500);
 
     } catch (error) {
-        logStatus("カメラアクセス拒否、またはHTTPS環境ではありません。", true);
+        logStatus("カメラアクセス拒否、またはHTTPS環境ではありません。", null, true);
         console.error(error);
     }
 }
