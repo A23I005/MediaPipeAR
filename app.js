@@ -1,5 +1,5 @@
-// MediaPipe Taskライブラリのインポート 
-import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js";
+// 【変更】1行目の import を削除し、ブラウザ共通のグローバル変数から機能を取得
+const { GestureRecognizer, FilesetResolver } = mpTasksVision;
 
 const video = document.getElementById('webcam');
 const startUI = document.getElementById('start-ui');
@@ -26,6 +26,7 @@ async function initAndroidAI() {
             },
             runningMode: "VIDEO"
         });
+        // 成功するとこの文字に切り替わります
         debugInfo.innerText = "準備完了！スタートボタンを押してください。";
     } catch (e) {
         debugInfo.innerText = "AIの初期化に失敗しました。";
@@ -36,6 +37,7 @@ async function initAndroidAI() {
 // 2. カメラの起動
 async function startCamera() {
     try {
+        // 仕様書推奨の背面カメラ設定 [cite: 46]
         const constraints = {
             video: {
                 facingMode: "environment",
