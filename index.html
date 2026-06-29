@@ -23,20 +23,24 @@
         window.addEventListener('error', (event) => {
             const debugElement = document.getElementById('debug-info');
             if (debugElement) {
-                debugElement.innerText = `【画面エラー】${event.message}\n(${event.filename}:${event.lineno})`;
+                // エラーが発生したら、即座に理由を画面に赤文字で出します
+                debugElement.innerText = `【エラー】\n${event.message}\n(${event.filename ? event.filename.split('/').pop() : ''}:${event.lineno})`;
                 debugElement.style.color = "#ff4444";
             }
         });
         window.addEventListener('unhandledrejection', (event) => {
             const debugElement = document.getElementById('debug-info');
             if (debugElement) {
-                debugElement.innerText = `【通信・非同期エラー】\n${event.reason}`;
+                debugElement.innerText = `【非同期エラー】\n${event.reason}`;
                 debugElement.style.color = "#ff4444";
             }
         });
     </script>
 
     <script type="module">
+        // スマホで一番安全に、確実に動く世界標準のインポート方式
+        import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js";
+
         const debugInfo = document.getElementById('debug-info');
         const video = document.getElementById('webcam');
         const startUI = document.getElementById('start-ui');
@@ -53,28 +57,20 @@
             } else {
                 debugInfo.innerText = message;
             }
-            debugInfo.style.color = isError ? "#ff4444" : "#00ff00";
+            debugInfo.style.color = isError ? "#ff4444" : "#00ff00"; // 正常なら緑、エラーなら赤
         }
 
-        // 初期化のメイン処理
+        // 初期化処理
         async function initARSystem() {
-            // ライブラリのダウンロード前に実行されるため、確実に表示が変わります
-            logStatus("JavaScriptの起動に成功！", 10);
+            logStatus("AIライブラリの読み込みに成功！", 20);
 
             try {
-                logStatus("AIライブラリ(大容量)をダウンロード中...", 30);
-                
-                // 【解決策】ここで裏で安全にロード。失敗しても上のエラーキャッチャーが即座に赤文字で理由を出します
-                const mpTasksVision = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js");
-                
-                logStatus("WASMコアエンジンをセットアップ中...", 55);
-                const { GestureRecognizer, FilesetResolver } = mpTasksVision;
-                
+                logStatus("WASMエンジンをセットアップ中...", 55);
                 const vision = await FilesetResolver.forVisionTasks(
                     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
                 );
 
-                logStatus("AIモデルを読み込み中...", 80);
+                logStatus("AIモデル(約5MB)をダウンロード中...", 80);
                 gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
                     baseOptions: {
                         modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
@@ -91,6 +87,7 @@
             }
         }
 
+        // カメラ起動処理
         async function startCamera() {
             logStatus("カメラへの接続を要求中...");
             try {
@@ -108,6 +105,7 @@
             }
         }
 
+        // ループ処理
         function predictLoop() {
             if (video.currentTime !== lastVideoTime) {
                 lastVideoTime = video.currentTime;
@@ -123,6 +121,7 @@
             requestAnimationFrame(predictLoop);
         }
 
+        // グー・パーの判定
         function updateDebounceAndCheckTrigger(currentGesture) {
             gestureHistory.push(currentGesture);
             if (gestureHistory.length > 5) gestureHistory.shift();
@@ -146,7 +145,7 @@
             }
         }
 
-        // 実行開始
+        // システムを起動
         initARSystem();
     </script>
 </body>
