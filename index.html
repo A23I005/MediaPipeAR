@@ -46,17 +46,17 @@
             debugInfo.style.color = isError ? "#ff4444" : "#00ff00";
         }
 
-        // HTMLが読み込まれた瞬間に実行される
+        // スクリプトの実行開始
         logStatus("スクリプト実行開始...", 5);
 
         async function initARSystem() {
             try {
                 logStatus("ライブラリを確認中...", 10);
                 
-                // tasksVision を取得（エラーが起きない従来方式）
-                const mpVision = window.tasksVision;
+                // 【修正】正しいグローバル変数名（mpTasksVision）に直しました
+                const mpVision = window.mpTasksVision || window.tasksVision;
                 if (!mpVision) {
-                    throw new Error("MediaPipeが読み込めません。通信環境を確認してください。");
+                    throw new Error("MediaPipeライブラリの読み込みに失敗しています。");
                 }
 
                 const { GestureRecognizer, FilesetResolver } = mpVision;
@@ -66,7 +66,7 @@
                     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
                 );
 
-                logStatus("AIモデルダウンロード中... (少し時間がかかります)", 60);
+                logStatus("AIモデルダウンロード中... (約5〜10秒かかります)", 60);
                 gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
                     baseOptions: {
                         modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
