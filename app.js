@@ -5,9 +5,10 @@ const startBtn = document.getElementById('start-btn');
 // カメラを起動する関数
 async function startCamera() {
     try {
-        // 解像度720p以上、30fps以上を推奨する設定
+        // 外カメラ（facingMode: "environment"）を指定
         const constraints = {
             video: {
+                facingMode: "environment", 
                 width: { ideal: 1280 },
                 height: { ideal: 720 },
                 frameRate: { ideal: 30 }
