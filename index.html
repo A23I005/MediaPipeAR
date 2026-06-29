@@ -19,8 +19,120 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js" crossorigin="anonymous"></script>
+    <script type="module">
+        // 万が一のエラーを画面に表示
+        window.addEventListener('error', (event) => {
+            const debugElement = document.getElementById('debug-info');
+            if (debugElement) {
+                debugElement.innerText = `【システムエラー】${event.message}`;
+                debugElement.style.color = "#ff4444";
+            }
+        });
 
-    <script src="app.js"></script>
+        const debugInfo = document.getElementById('debug-info');
+        
+        function logStatus(message, percent = null, isError = false) {
+            if (!debugInfo) return;
+            debugInfo.innerText = percent !== null ? `[${percent}%] ${message}` : message;
+            debugInfo.style.color = isError ? "#ff4444" : "#00ff00";
+        }
+
+        logStatus("プログラム読み込み開始...", 5);
+
+        // 【最重要】MediaPipeは必ず import で直接読み込む
+        import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js";
+
+        logStatus("AIライブラリの取得に成功！", 25);
+
+        const video = document.getElementById('webcam');
+        const startUI = document.getElementById('start-ui');
+        const startBtn = document.getElementById('start-btn');
+        
+        let gestureRecognizer;
+        let lastVideoTime = -1;
+        let gestureHistory = [];
+
+        async function initARSystem() {
+            try {
+                logStatus("WASMエンジンをセットアップ中...", 50);
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+                );
+
+                logStatus("AIモデルをダウンロード中...", 75);
+                gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO"
+                });
+
+                logStatus("準備完了！ボタンを押してスタートしてください。", 100);
+                startBtn.addEventListener('click', startCamera);
+
+            } catch (error) {
+                logStatus(`初期化失敗: ${error.message}`, null, true);
+            }
+        }
+
+        async function startCamera() {
+            logStatus("カメラへの接続を要求中...");
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+                    audio: false
+                });
+                video.srcObject = stream;
+                
+                startUI.style.display = 'none';
+                logStatus("カメラ接続成功！手を出してください。");
+                video.addEventListener('loadeddata', predictLoop);
+            } catch (error) {
+                logStatus(`カメラ起動エラー: アクセスが拒否されました。`, null, true);
+            }
+        }
+
+        function predictLoop() {
+            if (video.currentTime !== lastVideoTime) {
+                lastVideoTime = video.currentTime;
+                try {
+                    const results = gestureRecognizer.recognizeForVideo(video, performance.now());
+                    let currentGesture = "None";
+                    if (results.gestures && results.gestures.length > 0) {
+                        currentGesture = results.gestures[0][0].categoryName;
+                    }
+                    updateDebounceAndCheckTrigger(currentGesture);
+                } catch (err) {}
+            }
+            requestAnimationFrame(predictLoop);
+        }
+
+        function updateDebounceAndCheckTrigger(currentGesture) {
+            gestureHistory.push(currentGesture);
+            if (gestureHistory.length > 5) gestureHistory.shift();
+
+            let fistCount = 0;
+            let maxConsecutiveFist = 0;
+            for (let i = 0; i < gestureHistory.length - 1; i++) {
+                if (gestureHistory[i] === "Closed_Fist") {
+                    fistCount++;
+                    if (fistCount > maxConsecutiveFist) maxConsecutiveFist = fistCount;
+                } else {
+                    fistCount = 0;
+                }
+            }
+
+            if (maxConsecutiveFist >= 3 && currentGesture === "Open_Palm") {
+                logStatus("【★恐竜召喚イベント発火！★】");
+                debugInfo.style.color = "#ff00ff";
+            } else {
+                logStatus(`認識中の手: ${currentGesture}`);
+            }
+        }
+
+        // 初期化処理をスタート
+        initARSystem();
+    </script>
 </body>
 </html>
