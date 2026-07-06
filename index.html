@@ -21,11 +21,11 @@
         #loading-ui {
             position: absolute; z-index: 30; color: white; top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0,0,0,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center;
+            padding: 20px; box-sizing: border-box; text-align: center;
         }
         button { padding: 14px 28px; font-size: 16px; border-radius: 5px; border: none; cursor: pointer; background: #007bff; color: white; font-weight: bold; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -42,7 +42,10 @@
         <button id="start-btn" style="display:none;">カメラを許可してARをスタート</button>
     </div>
 
-    <script>
+    <script type="module">
+        // MediaPipe を安定したCDNから直接インポート
+        import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
         const video = document.getElementById('webcam');
         const startBtn = document.getElementById('start-btn');
         const statusText = document.getElementById('status');
@@ -70,23 +73,27 @@
         // ページ読み込み時にMediaPipe（AI）をバックグラウンドで初期化
         async function initMediaPipe() {
             try {
-                const vision = await mpTasksVision.FilesetResolver.forVisionTasks(
-                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+                // WASMアセットの解決先を指定
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
                 );
-                gestureRecognizer = await mpTasksVision.GestureRecognizer.createFromOptions(vision, {
+                // ジェスチャー認識モデルの読み込み
+                gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
                     baseOptions: {
                         modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
                         delegate: "GPU"
                     },
                     runningMode: "VIDEO"
                 });
+                
                 // 準備完了したらボタンを表示
                 loadingText.style.display = "none";
                 startBtn.style.display = "block";
                 statusText.innerText = "Ready";
             } catch (err) {
                 console.error(err);
-                loadingText.innerText = "AIの初期化に失敗しました。再読み込みしてください。";
+                // エラーの詳細を画面に表示して原因究明しやすくする
+                loadingText.innerHTML = `AIの初期化に失敗しました。<br><br><span style="color:#ff6b6b; font-size:13px; text-align:left; display:block; background:#222; padding:10px; border-radius:5px; word-break:break-all;">Error: ${err.message}</span>`;
             }
         }
 
@@ -200,7 +207,7 @@
                     const width = window.innerWidth;
                     const height = window.innerHeight;
                     
-                    // フロントカメラと背面カメラの鏡像補正（必要に応じて調整）
+                    // 鏡像補正をして座標をセット
                     boxMesh.position.x = (smoothX - 0.5) * width;
                     boxMesh.position.y = (0.5 - smoothY) * height; // Y軸は上下反転
 
