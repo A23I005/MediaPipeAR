@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>mediapipeAR - Advanced Monitor Tracking</title>
+    <title>mediapipeAR - Smart Device Monitor Tracking</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        /* 全てのレイヤーを完全に同じサイズで重ねて歪みを防止 */
+        /* 各スマホのディスプレイ特性に合わせて object-fit をカバーに固定 */
         #webcam, #canvasOutput, #webgl-canvas {
             position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover;
         }
@@ -39,7 +39,7 @@
     </div>
 
     <div id="loading-ui">
-        <p id="loading-text">高画質・高精度モニター検出AR</p>
+        <p id="loading-text">機種最適化・誤検出対策版モニターAR</p>
         <button id="start-btn">カメラを許可してスタート</button>
     </div>
 
@@ -53,21 +53,27 @@
         const loadingUi = document.getElementById('loading-ui');
 
         let scene, camera, renderer, boxMesh;
-        let trackWidth = 320; // 内部解析用解像度 (軽さを維持)
-        let trackHeight = 240;
 
+        // スマホの機種ごとの画角・画面サイズに合わせてThree.jsを完全にフィッティングさせる関数
         function initThree() {
             const width = window.innerWidth;
             const height = window.innerHeight;
+            const aspect = width / height;
+
             scene = new THREE.Scene();
             
-            // 画面比率に合わせたカメラ設定で3Dの伸び縮みを防ぐ
-            camera = new THREE.OrthographicCamera(-width / 2, width / 2, height / 2, -height / 2, 0.1, 1000);
+            // 機種の画面比率(aspect)を反映させてオブジェクトの歪みを完全に防止
+            camera = new THREE.OrthographicCamera(
+                -width / 2, width / 2, 
+                height / 2, -height / 2, 
+                0.1, 1000
+            );
             camera.position.z = 10;
 
             renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true });
             renderer.setSize(width, height);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            // レティナディスプレイ(iPhone等)や高画素Androidの比率に合わせる
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             
             const geometry = new THREE.BoxGeometry(60, 60, 60);
             const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
@@ -81,11 +87,13 @@
         function onWindowResize() {
             const width = window.innerWidth;
             const height = window.innerHeight;
+            
             camera.left = -width / 2;
             camera.right = width / 2;
             camera.top = height / 2;
             camera.bottom = -height / 2;
             camera.updateProjectionMatrix();
+            
             renderer.setSize(width, height);
         }
 
@@ -94,18 +102,19 @@
             initThree();
 
             try {
-                // 1. 高画質(720p)かつ背面のメインカメラを確実に指定して歪みを防止
-                const stream = await navigator.mediaDevices.getUserMedia({ 
+                // デバイスが対応している最大・最適な画質を自動で要求
+                const constraints = {
                     video: { 
                         facingMode: "environment", 
-                        width: { ideal: 1280 }, 
-                        height: { ideal: 720 } 
-                    } 
-                });
+                        width: { ideal: 1920, max: 3840 }, 
+                        height: { ideal: 1080, max: 2160 } 
+                    }
+                };
+                
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
                 await video.play();
 
-                // 2. 描画用キャンバスを実際の画面（スマホ）の表示領域と完全に一致させる
                 canvasOutput.width = window.innerWidth;
                 canvasOutput.height = window.innerHeight;
 
@@ -122,24 +131,22 @@
                 const screenWidth = window.innerWidth;
                 const screenHeight = window.innerHeight;
                 
-                // キャンバスサイズが画面とズレていたら自動修正
                 if(canvasOutput.width !== screenWidth) {
                     canvasOutput.width = screenWidth;
                     canvasOutput.height = screenHeight;
                 }
 
-                // 画面全体の高画質映像をクリアに描画
                 ctxOutput.clearRect(0, 0, screenWidth, screenHeight);
                 ctxOutput.drawImage(video, 0, 0, screenWidth, screenHeight);
 
-                // メモリ負荷を下げつつ精密に走査するため、画面のピクセルデータを取得
                 const frame = ctxOutput.getImageData(0, 0, screenWidth, screenHeight);
                 const data = frame.data;
 
                 let minX = screenWidth, maxX = 0, minY = screenHeight, maxY = 0;
                 let detectedPixels = 0;
+                let totalBrightness = 0;
+                let sampleCount = 0;
 
-                // スキャンのステップを細かくし、検知力をアップ
                 const step = 8; 
                 for (let y = 0; y < screenHeight; y += step) {
                     for (let x = 0; x < screenWidth; x += step) {
@@ -148,9 +155,12 @@
                         const g = data[idx + 1];
                         const b = data[idx + 2];
 
-                        // モニターのベゼル（暗い枠）の基準
                         const brightness = (r + g + b) / 3;
-                        if (brightness < 65 && Math.abs(r - g) < 12 && Math.abs(g - b) < 12) {
+                        totalBrightness += brightness;
+                        sampleCount++;
+
+                        // モニターのベゼル（暗い枠）候補の抽出基準
+                        if (brightness < 60 && Math.abs(r - g) < 12 && Math.abs(g - b) < 12) {
                             if (x < minX) minX = x;
                             if (x > maxX) maxX = x;
                             if (y < minY) minY = y;
@@ -160,44 +170,49 @@
                     }
                 }
 
+                // 画面全体の平均輝度を算出
+                const avgScreenBrightness = totalBrightness / sampleCount;
+
                 const areaWidth = maxX - minX;
                 const areaHeight = maxY - minY;
-
                 let isRealMonitor = false;
 
-                // 【誤認識対策ロジック】暗い塊を見つけたら、モニターの条件を満たしているか厳格チェック
-                if (detectedPixels > 50 && areaWidth > 120 && areaHeight > 90) {
+                // 【バグ修正】画面全体が真っ暗（平均輝度が45未満）な時は、誤認を完全に防止するためスキップ
+                if (avgScreenBrightness > 45) {
                     
-                    // 条件①: アスペクト比の検証（横幅の方が長く、極端な細長ではないこと）
-                    const aspect = areaWidth / areaHeight;
-                    if (aspect >= 1.1 && aspect <= 2.2) {
+                    // 暗い四角形のサイズ検証
+                    if (detectedPixels > 40 && areaWidth > 100 && areaHeight > 80) {
                         
-                        // 条件②: コントラスト（明暗差）の検証
-                        // 検出した四角形の「中心付近」の明るさをサンプリング
-                        const cx = Math.floor(minX + areaWidth / 2);
-                        const cy = Math.floor(minY + areaHeight / 2);
-                        const centerIdx = (cy * screenWidth + cx) * 4;
-                        
-                        if (centerIdx < data.length) {
-                            const cr = data[centerIdx];
-                            const cg = data[centerIdx + 1];
-                            const cb = data[centerIdx + 2];
-                            const centerBrightness = (cr + cg + cb) / 3;
+                        // モニターの比率検証（横長であること）
+                        const aspect = areaWidth / areaHeight;
+                        if (aspect >= 1.2 && aspect <= 2.3) {
+                            
+                            // 中心点（画面内側）の輝度サンプリング
+                            const cx = Math.floor(minX + areaWidth / 2);
+                            const cy = Math.floor(minY + areaHeight / 2);
+                            const centerIdx = (cy * screenWidth + cx) * 4;
+                            
+                            if (centerIdx < data.length) {
+                                const cr = data[centerIdx];
+                                const cg = data[centerIdx + 1];
+                                const cb = data[centerIdx + 2];
+                                const centerBrightness = (cr + cg + cb) / 3;
 
-                            // モニターの画面（中心）が、外枠のベゼル（暗さ65以下）よりも明らかに明るいか判定
-                            if (centerBrightness > 85) {
-                                isRealMonitor = true;
+                                // 外枠が「暗く」、内側がしっかり「明るく光っている（輝度90以上）」場合のみ本物と断定
+                                if (centerBrightness > 90) {
+                                    isRealMonitor = true;
+                                canvasOutput.height = screenHeight;
+                                }
                             }
                         }
                     }
                 }
 
-                // モニターの条件をすべてクリアした場合のみARを表示
+                // 厳格な判定をパスした場合のみAR立方体を表示
                 if (isRealMonitor) {
                     scanResultText.innerText = "Monitor Detected";
                     scanResultText.style.color = "#00ffff";
 
-                    // 捉えたモニターの枠に綺麗な緑の線を引く
                     ctxOutput.strokeStyle = "#00ff00";
                     ctxOutput.lineWidth = 4;
                     ctxOutput.strokeRect(minX, minY, areaWidth, areaHeight);
@@ -205,14 +220,12 @@
                     const centerX = minX + (areaWidth / 2);
                     const centerY = minY + (areaHeight / 2);
 
-                    // 3D空間の座標系へ滑らかにマッピング
                     const targetX = ((centerX / screenWidth) - 0.5) * screenWidth;
                     const targetY = (0.5 - (centerY / screenHeight)) * screenHeight;
 
-                    // EMAスムージングを適用 (仕様書 7.2: α=0.3)
+                    // スムージング追従
                     boxMesh.position.x = 0.3 * targetX + 0.7 * boxMesh.position.x;
                     boxMesh.position.y = 0.3 * targetY + 0.7 * boxMesh.position.y;
-                    
                     boxMesh.visible = true;
                 } else {
                     scanResultText.innerText = "Scanning Monitor...";
