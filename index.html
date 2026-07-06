@@ -261,7 +261,7 @@
             <h1>Advanced AI Monitor Recognizer</h1>
             <div class="description">
                 <strong>【2クラス・各10枚高速テストモード】</strong><br>
-                最新の画像状況（.jpg / .JPG混在対応版）に合わせて自動で読み込み、AR稼働テストを行います。
+                Shapeサイズエラー（1024固定化）に対応した修正ビルドです。計20枚のデータでAR稼働テストを行います。
             </div>
             
             <div class="progress-bar-container" id="p-container">
@@ -295,7 +295,7 @@
         const viewMatrixStats = document.getElementById('matrix-stats');
 
         const SystemWeightsConfig = {
-            inputLayerNodes: 1024,
+            inputLayerNodes: 1024, // MobileNet V2の特定中間レイヤー（1024次元）に固定
             hiddenLayerNodesAlpha: 256,
             hiddenLayerNodesBeta: 64,
             outputClasses: 2,
@@ -348,9 +348,6 @@
             });
         }
 
-        /**
-         * 最新のJPEG大文字小文字混在状況（.jpg / .JPG）に完全対応させたロード関数
-         */
         async function runDatasetIngestionModule() {
             pushLog("最新のJPEG拡張子（.jpg / .JPG）に対応したデータロードを開始...");
             const grandTotalSteps = GlobalState.targetSamplesPerClass * 2;
@@ -359,13 +356,7 @@
             // --- クラス 0 : モニター1 (10枚) ---
             for (let i = 1; i <= 10; i++) {
                 const formattedIndex = i < 10 ? "0" + i : "" + i;
-                
-                // 現在のフォルダ状況：1〜7は小文字.jpg、8〜10は大文字.JPG
-                let ext = ".jpg";
-                if (i >= 8) {
-                    ext = ".JPG";
-                }
-                
+                let ext = (i >= 8) ? ".JPG" : ".jpg";
                 const path = "dataset/monitor1_" + formattedIndex + ext;
                 try {
                     const loadedImg = await fetchImageBlobElement(path);
@@ -381,13 +372,7 @@
             // --- クラス 1 : モニター2 (10枚) ---
             for (let i = 1; i <= 10; i++) {
                 const formattedIndex = i < 10 ? "0" + i : "" + i;
-                
-                // 現在のフォルダ状況：1は小文字.jpg、2〜10は大文字.JPG
-                let ext = ".JPG";
-                if (i === 1) {
-                    ext = ".jpg";
-                }
-                
+                let ext = (i === 1) ? ".jpg" : ".JPG";
                 const path = "dataset/monitor2_" + formattedIndex + ext;
                 try {
                     const loadedImg = await fetchImageBlobElement(path);
@@ -441,14 +426,23 @@
             });
 
             GlobalState.trainedClassifier = customSequentialModel;
-            pushLog("2クラス用モデルのコンパイルが完了。");
+            pushLog("2クラス用カスタムモデルのコンパイルが完了。");
+        }
+
+        // MobileNetV2から確実に出力サイズ1024の特徴量レイヤーを抽出するヘルパー
+        function getFeatureActivationTensor(inputTensor) {
+            // モバイルブラウザでの不整合を防ぐため、1024次元のグローバルプールレイヤー出力を選択
+            const layer = GlobalState.baseFeatureExtractor.model.getLayer('global_average_pooling2d');
+            const internalModel = tf.model({inputs: GlobalState.baseFeatureExtractor.model.inputs, outputs: layer.output});
+            return internalModel.predict(inputTensor);
         }
 
         async function runModelTrainingOptimization() {
-            pushLog("MobileNetを読み込み中...");
+            pushLog("MobileNet V2 (出力サイズ固定版) をロード中...");
             advanceUIProgress("ベースAIを起動中...", 30);
             
-            GlobalState.baseFeatureExtractor = await mobilenet.load({ version: 1, alpha: 1.0 });
+            // バージョン2、アルファ1.0に指定してサイズを1024に確実にロック
+            GlobalState.baseFeatureExtractor = await mobilenet.load({ version: 2, alpha: 1.0 });
             compileCustomNeuralClassifier();
 
             const inputFeatureVectors = [];
@@ -462,7 +456,7 @@
                         const normalizedTensor = scaledTensor.toFloat().sub(127.5).div(127.5);
                         const batchedTensor = normalizedTensor.expandDims(0);
                         
-                        const featureActivation = GlobalState.baseFeatureExtractor.model.predict(batchedTensor);
+                        const featureActivation = getFeatureActivationTensor(batchedTensor);
                         const reshapedFeature = featureActivation.reshape([SystemWeightsConfig.inputLayerNodes]);
                         
                         inputFeatureVectors.push(reshapedFeature.clone());
@@ -581,7 +575,7 @@
                     const standardizedFrame = processedFrame.toFloat().sub(127.5).div(127.5);
                     const singleBatchFrame = standardizedFrame.expandDims(0);
                     
-                    const activationFeatures = GlobalState.baseFeatureExtractor.model.predict(singleBatchFrame);
+                    const activationFeatures = getFeatureActivationTensor(singleBatchFrame);
                     const flatFeatures = activationFeatures.reshape([SystemWeightsConfig.inputLayerNodes]);
                     const modelInputTensor = flatFeatures.expandDims(0);
                     
