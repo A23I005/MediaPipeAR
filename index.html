@@ -29,7 +29,7 @@
 </head>
 <body>
 
-    <video id="webcam" autoplay playsinline></video>
+    <video id="webcam" autoplay playsinline muted></video>
     <canvas id="webgl-canvas"></canvas>
 
     <div id="ui-layer">
@@ -43,7 +43,6 @@
     </div>
 
     <script type="module">
-        // MediaPipe を安定したCDNから直接インポート
         import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
         const video = document.getElementById('webcam');
@@ -73,11 +72,9 @@
         // ページ読み込み時にMediaPipe（AI）をバックグラウンドで初期化
         async function initMediaPipe() {
             try {
-                // WASMアセットの解決先を指定
                 const vision = await FilesetResolver.forVisionTasks(
                     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
                 );
-                // ジェスチャー認識モデルの読み込み
                 gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
                     baseOptions: {
                         modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
@@ -86,25 +83,23 @@
                     runningMode: "VIDEO"
                 });
                 
-                // 準備完了したらボタンを表示
                 loadingText.style.display = "none";
                 startBtn.style.display = "block";
                 statusText.innerText = "Ready";
             } catch (err) {
                 console.error(err);
-                // エラーの詳細を画面に表示して原因究明しやすくする
                 loadingText.innerHTML = `AIの初期化に失敗しました。<br><br><span style="color:#ff6b6b; font-size:13px; text-align:left; display:block; background:#222; padding:10px; border-radius:5px; word-break:break-all;">Error: ${err.message}</span>`;
             }
         }
 
-        // Three.jsの初期化（3D空間の準備）
+        // Three.jsの初期化
         function initThree() {
             const width = window.innerWidth;
             const height = window.innerHeight;
 
             scene = new THREE.Scene();
 
-            // 【仕様書 6.3】 2Dスクリーン座標を1対1でマッピングするため平行投影カメラを採用
+            // 【仕様書 6.3】 平行投影カメラを採用
             camera = new THREE.OrthographicCamera(-width / 2, width / 2, height / 2, -height / 2, 0.1, 1000);
             camera.position.z = 10;
 
@@ -112,11 +107,11 @@
             renderer.setSize(width, height);
             renderer.setPixelRatio(window.devicePixelRatio);
 
-            // 恐竜の代わりの「仮の赤い立方体」を作成
+            // 仮の赤い立方体
             const geometry = new THREE.BoxGeometry(60, 60, 60);
             const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
             boxMesh = new THREE.Mesh(geometry, material);
-            boxMesh.visible = false; // 最初は非表示
+            boxMesh.visible = false;
             scene.add(boxMesh);
 
             window.addEventListener('resize', onWindowResize);
@@ -133,32 +128,33 @@
             renderer.setSize(width, height);
         }
 
-        // ユーザーが「スタート」を押したらカメラと3Dを開始
+        // スタートボタン押下時
         startBtn.addEventListener('click', async () => {
             loadingUi.style.display = 'none';
             initThree();
 
             try {
-                // スマホの背面メインカメラ（environment）を優先的に起動、HD解像度要求
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } 
                 });
                 video.srcObject = stream;
-                video.addEventListener('loadeddata', () => {
-                    statusText.innerText = "Tracking Active";
-                    requestAnimationFrame(renderLoop);
-                });
+                
+                // iOS対策: 明示的に再開をかける
+                await video.play();
+                
+                statusText.innerText = "Tracking Active";
+                requestAnimationFrame(renderLoop);
             } catch (err) {
                 console.error("カメラ起動エラー:", err);
-                alert("AR体験にはカメラの許可が必要です。URLがHTTPSであることを確認してください。");
+                alert("AR体験にはカメラの許可が必要です。");
             }
         });
 
         // 毎フレーム実行されるループ処理
         function renderLoop() {
-            if (video.readyState === video.HAVE_CURRENT_DATA) {
+            // 【バグ修正!!】 === から >= に変更し、準備完了(4)の状態でも確実にループが走るように修正
+            if (video.readyState >= video.HAVE_CURRENT_DATA) {
                 const now = performance.now();
-                // MediaPipeで手とジェスチャーを解析
                 const results = gestureRecognizer.recognizeForVideo(video, now);
 
                 let currentGesture = "None";
@@ -169,13 +165,13 @@
                     handDetected = true;
                 }
 
+                // 毎フレーム、検出したジェスチャー名（何もなければ None）を表示
                 gestureText.innerText = currentGesture;
 
-                // --- 【仕様書 7.1】 誤作動防止（デバウンス）処理 ---
+                // --- 【仕様書 7.1】 デバウンス処理 ---
                 gestureHistory.push(currentGesture);
                 if (gestureHistory.length > HISTORY_LIMIT) { gestureHistory.shift(); }
 
-                // 直近の履歴（過去5フレーム内）で「グー(Closed_Fist)」が連続して3フレーム以上あったかを検証
                 let fistCount = 0;
                 let maxContinuousFist = 0;
                 for (let i = 0; i < gestureHistory.length; i++) {
@@ -187,15 +183,14 @@
                     }
                 }
 
-                // 手が検出されている場合の処理
                 if (handDetected && results.landmarks && results.landmarks.length > 0) {
-                    // 【仕様書 6.3】 手のひらの中心点（ランドマーク9番）を取得
+                    // 【仕様書 6.3】 ランドマーク9番（手のひら中心）
                     const landmark9 = results.landmarks[0][9];
                     
                     let targetX = landmark9.x;
                     let targetY = landmark9.y;
 
-                    // --- 【仕様書 7.2】 座標平滑化（指数移動平均: EMA） ---
+                    // --- 【仕様書 7.2】 座標平滑化（EMA） ---
                     if (prevX === null || prevY === null) {
                         prevX = targetX; prevY = targetY;
                     }
@@ -203,43 +198,39 @@
                     const smoothY = ALPHA * targetY + (1 - ALPHA) * prevY;
                     prevX = smoothX; prevY = smoothY;
 
-                    // MediaPipeの0〜1の座標系を、Three.jsの画面座標空間にマッピング
                     const width = window.innerWidth;
                     const height = window.innerHeight;
                     
-                    // 鏡像補正をして座標をセット
                     boxMesh.position.x = (smoothX - 0.5) * width;
-                    boxMesh.position.y = (0.5 - smoothY) * height; // Y軸は上下反転
+                    boxMesh.position.y = (0.5 - smoothY) * height;
 
-                    // --- 【仕様書 6.2】 状態遷移トリガー（グーからパーへの変化） ---
+                    // --- 【仕様書 6.2】 状態遷移トリガー（グーからパーへ） ---
                     if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
-                        // 召喚イベント発火！
                         isDinoVisible = true;
                         boxMesh.visible = true;
                         spawnStartTime = now;
                     }
-                    // 【仕様書 6.3】 消失処理: 再度「グー」に戻った場合
+                    // 【仕様書 6.3】 消失処理
                     else if (isDinoVisible && currentGesture === "Closed_Fist") {
                         isDinoVisible = false;
                         boxMesh.visible = false;
                     }
 
-                    // --- 【仕様書 6.3】 出現時エフェクト（0.3秒で滑らかに拡大） ---
+                    // --- 【仕様書 6.3】 出現時エフェクト ---
                     if (isDinoVisible) {
                         const elapsed = now - spawnStartTime;
-                        const progress = Math.min(elapsed / SPAWN_DURATION, 1.0); // 0.0 〜 1.0
+                        const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
                         boxMesh.scale.set(progress, progress, progress);
                     }
 
                 } else {
-                    // 【仕様書 6.3】 消失処理: 手が画面外へ外れた場合
+                    // 【仕様書 6.3】 消失処理（画面外）
                     isDinoVisible = false;
                     boxMesh.visible = false;
                     prevX = null; prevY = null;
                 }
             }
 
-            // 立方体を少し回転させて3Dらしく見せる
             if (boxMesh.visible) {
                 boxMesh.rotation.x += 0.01;
                 boxMesh.rotation.y += 0.01;
@@ -249,7 +240,6 @@
             requestAnimationFrame(renderLoop);
         }
 
-        // 初期化スタート
         initMediaPipe();
     </script>
 </body>
