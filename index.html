@@ -216,8 +216,8 @@
         <div class="app-card">
             <h1>Advanced AI Monitor Recognizer</h1>
             <div class="description">
-                <strong>【2クラス高速テストモード】</strong><br>
-                ビルドエラー対策と、MobileNet V2によるShape不一致エラー(1024次元固定化)を修正した安定版パッチです。
+                <strong>【MobileNet API バグ修正パッチ】</strong><br>
+                `getLayer`のエラーを解決するため、MobileNetモデルの内部構造（baseModel）から直接1024次元の特徴量を抽出するように変更しました。
             </div>
             <div class="progress-bar-container" id="p-container">
                 <div class="progress-bar-fill" id="p-fill"></div>
@@ -262,6 +262,7 @@
 
         const GlobalState = {
             baseFeatureExtractor: null,
+            internalMobileNetModel: null,
             trainedClassifier: null,
             isEngineReady: false,
             imageStorage: { monitor1: [], monitor2: [] },
@@ -360,10 +361,14 @@
             GlobalState.trainedClassifier = customSequentialModel;
         }
 
+        // ラッパーではなく、内部の実際のベースモデルからレイヤーを取得するように修正
         function getFeatureActivationTensor(inputTensor) {
-            const layer = GlobalState.baseFeatureExtractor.model.getLayer('global_average_pooling2d');
-            const internalModel = tf.model({inputs: GlobalState.baseFeatureExtractor.model.inputs, outputs: layer.output});
-            return internalModel.predict(inputTensor);
+            if (!GlobalState.internalMobileNetModel) {
+                const base = GlobalState.baseFeatureExtractor.baseModel || GlobalState.baseFeatureExtractor.model;
+                const layer = base.getLayer('global_average_pooling2d');
+                GlobalState.internalMobileNetModel = tf.model({inputs: base.inputs, outputs: layer.output});
+            }
+            return GlobalState.internalMobileNetModel.predict(inputTensor);
         }
 
         async function runModelTrainingOptimization() {
