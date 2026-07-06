@@ -18,7 +18,6 @@
             -webkit-user-select: none;
         }
 
-        /* 映像レイヤーおよび3Dレイヤーの画面絶対配置設定 */
         #canvasOutput, #webgl-canvas {
             position: absolute;
             top: 0;
@@ -83,7 +82,6 @@
             margin-top: 4px;
         }
 
-        /* 開発者用リアルタイムログターミナル */
         #console-log {
             grid-column: span 2;
             background: #07080a;
@@ -153,7 +151,6 @@
             border-left: 3px solid #228be6;
         }
 
-        /* インジケータ・プログレス表示 */
         .progress-bar-container {
             width: 100%;
             background-color: rgba(255, 255, 255, 0.08);
@@ -173,7 +170,6 @@
             transition: width 0.15s ease-out;
         }
 
-        /* アクション起動ボタン (赤波線エラー修正済み) */
         .action-btn {
             background: linear-gradient(135deg, #228be6 0%, #1c7ed6 100%);
             background-color: #1c7ed6;
@@ -205,7 +201,6 @@
             color: #868e96;
         }
 
-        /* ヘッドアップディスプレイ推論HUD */
         #inference-hud {
             position: absolute;
             bottom: 30px;
@@ -266,9 +261,7 @@
             <h1>Advanced AI Monitor Recognizer</h1>
             <div class="description">
                 <strong>【2クラス・各10枚高速テストモード】</strong><br>
-                ・モニター1 (`monitor1_01.jpg` ～ `10.jpg`) = 計10枚<br>
-                ・モニター2 (`monitor2_01.jpg` ～ `10.jpg`) = 計10枚<br>
-                背景画像なしの最小データセット構成でAR稼働テストを行います。
+                最新の画像状況（.jpg / .JPG混在対応版）に合わせて自動で読み込み、AR稼働テストを行います。
             </div>
             
             <div class="progress-bar-container" id="p-container">
@@ -285,12 +278,6 @@
     <div id="inference-hud">CORE PREPARING</div>
 
     <script>
-        /**
-         * ==================================================================================
-         * 2クラス（モニター1 / モニター2）限定・高速検証用エッジAI追従システム
-         * ==================================================================================
-         */
-
         const domVideo = document.getElementById('webcam');
         const domCanvasOut = document.getElementById('canvasOutput');
         const domCtxOut = domCanvasOut.getContext('2d');
@@ -307,16 +294,15 @@
         const viewPredictScore = document.getElementById('predict-score');
         const viewMatrixStats = document.getElementById('matrix-stats');
 
-        // システムパラメータ構成（出力クラス数を2に変更）
         const SystemWeightsConfig = {
             inputLayerNodes: 1024,
-            hiddenLayerNodesAlpha: 256,   // データ軽量化に伴いノード数を最適化
+            hiddenLayerNodesAlpha: 256,
             hiddenLayerNodesBeta: 64,
-            outputClasses: 2,             // モニター1, モニター2 の2値分類
+            outputClasses: 2,
             learningRate: 0.0002,
-            trainingEpochs: 40,           // 枚数が少ないためエポック数を40に調整
+            trainingEpochs: 40,
             batchSize: 4,
-            minActivationScore: 0.80,     // 判定基準の閾値
+            minActivationScore: 0.80,
             smoothingFilterFactor: 0.25
         };
 
@@ -328,7 +314,7 @@
                 monitor1: [],
                 monitor2: []
             },
-            targetSamplesPerClass: 10,   // 1クラスあたり10枚設定
+            targetSamplesPerClass: 10,
             resolvedVideoWidth: 1280,
             resolvedVideoHeight: 720,
             frameLoopId: null
@@ -363,36 +349,52 @@
         }
 
         /**
-         * モニター1・モニター2（各10枚）の高速パース
+         * 最新のJPEG大文字小文字混在状況（.jpg / .JPG）に完全対応させたロード関数
          */
         async function runDatasetIngestionModule() {
-            pushLog("2クラス高速データロードを開始...");
+            pushLog("最新のJPEG拡張子（.jpg / .JPG）に対応したデータロードを開始...");
             const grandTotalSteps = GlobalState.targetSamplesPerClass * 2;
             let currentProcessedCount = 0;
 
-            // クラス 0 : モニター1 (10枚)
-            for (let i = 1; i <= GlobalState.targetSamplesPerClass; i++) {
+            // --- クラス 0 : モニター1 (10枚) ---
+            for (let i = 1; i <= 10; i++) {
                 const formattedIndex = i < 10 ? "0" + i : "" + i;
-                const path = "dataset/monitor1_" + formattedIndex + ".jpg";
+                
+                // 現在のフォルダ状況：1〜7は小文字.jpg、8〜10は大文字.JPG
+                let ext = ".jpg";
+                if (i >= 8) {
+                    ext = ".JPG";
+                }
+                
+                const path = "dataset/monitor1_" + formattedIndex + ext;
                 try {
                     const loadedImg = await fetchImageBlobElement(path);
                     GlobalState.imageStorage.monitor1.push(loadedImg);
+                    pushLog("Loaded: " + path);
                 } catch (err) {
-                    pushLog("Warning: " + path + " が見つかりません。");
+                    pushLog("Failed: " + path);
                 }
                 currentProcessedCount++;
                 advanceUIProgress("Loading monitor1: " + i + " / 10", Math.floor((currentProcessedCount / grandTotalSteps) * 100));
             }
 
-            // クラス 1 : モニター2 (10枚)
-            for (let i = 1; i <= GlobalState.targetSamplesPerClass; i++) {
+            // --- クラス 1 : モニター2 (10枚) ---
+            for (let i = 1; i <= 10; i++) {
                 const formattedIndex = i < 10 ? "0" + i : "" + i;
-                const path = "dataset/monitor2_" + formattedIndex + ".jpg";
+                
+                // 現在のフォルダ状況：1は小文字.jpg、2〜10は大文字.JPG
+                let ext = ".JPG";
+                if (i === 1) {
+                    ext = ".jpg";
+                }
+                
+                const path = "dataset/monitor2_" + formattedIndex + ext;
                 try {
                     const loadedImg = await fetchImageBlobElement(path);
                     GlobalState.imageStorage.monitor2.push(loadedImg);
+                    pushLog("Loaded: " + path);
                 } catch (err) {
-                    pushLog("Warning: " + path + " が見つかりません。");
+                    pushLog("Failed: " + path);
                 }
                 currentProcessedCount++;
                 advanceUIProgress("Loading monitor2: " + i + " / 10", Math.floor((currentProcessedCount / grandTotalSteps) * 100));
@@ -403,13 +405,10 @@
             pushLog("ロード完了 -> モニター1: " + parsedM1 + "枚, モニター2: " + parsedM2 + "枚");
 
             if (parsedM1 === 0 && parsedM2 === 0) {
-                throw new Error("画像が1枚も読み込めませんでした。dataset内のファイル名（monitor1_01.jpg等）を確認してください。");
+                throw new Error("画像が一枚も読み込めませんでした。GitHubへの反映状況を確認してください。");
             }
         }
 
-        /**
-         * 2クラス用ニューラルネットワーク構築
-         */
         function compileCustomNeuralClassifier() {
             const customSequentialModel = tf.sequential();
             
@@ -428,7 +427,6 @@
                 kernelInitializer: 'varianceScaling'
             }));
             
-            // 出力ユニット数を 2 に設定
             customSequentialModel.add(tf.layers.dense({
                 units: SystemWeightsConfig.outputClasses,
                 activation: 'softmax',
@@ -446,9 +444,6 @@
             pushLog("2クラス用モデルのコンパイルが完了。");
         }
 
-        /**
-         * 特徴量抽出とトレーニングの実行
-         */
         async function runModelTrainingOptimization() {
             pushLog("MobileNetを読み込み中...");
             advanceUIProgress("ベースAIを起動中...", 30);
@@ -472,7 +467,6 @@
                         
                         inputFeatureVectors.push(reshapedFeature.clone());
                         
-                        // 2クラス対応 1-Hot表現 ([1, 0] または [0, 1])
                         const oneHotArray = [0, 0];
                         oneHotArray[targetClassId] = 1;
                         outputTargetLabels.push(tf.tensor1d(oneHotArray));
@@ -483,8 +477,8 @@
             advanceUIProgress("特徴量マトリクスに変換中...", 60);
             await tf.nextFrame();
 
-            extractFeaturesFromClassArray(GlobalState.imageStorage.monitor1, 0); // Class 0
-            extractFeaturesFromClassArray(GlobalState.imageStorage.monitor2, 1); // Class 1
+            extractFeaturesFromClassArray(GlobalState.imageStorage.monitor1, 0);
+            extractFeaturesFromClassArray(GlobalState.imageStorage.monitor2, 1);
 
             const trainingX = tf.stack(inputFeatureVectors);
             const trainingY = tf.stack(outputTargetLabels);
@@ -492,7 +486,7 @@
             inputFeatureVectors.forEach(t => t.dispose());
             outputTargetLabels.forEach(t => t.dispose());
 
-            pushLog("学習演算ループ(バックプロパゲーション)を開始...");
+            pushLog("学習演算ループを開始...");
             await tf.nextFrame();
 
             await GlobalState.trainedClassifier.fit(trainingX, trainingY, {
@@ -577,9 +571,6 @@
             };
         }
 
-        /**
-         * リアルタイム推論ループ
-         */
         async function runRealtimeInferenceThreadLoop() {
             if (domVideo.readyState >= domVideo.HAVE_CURRENT_DATA) {
                 domCtxOut.drawImage(domVideo, 0, 0, GlobalState.resolvedVideoWidth, GlobalState.resolvedVideoHeight);
@@ -614,7 +605,6 @@
                 viewPredictClass.innerText = recognizedTargetName;
                 viewPredictScore.innerText = visualConfidence;
 
-                // 2クラスモードでは、どちらかの確率が設定値(80%)を超えた場合にARを描画
                 if (topProbabilityScore > SystemWeightsConfig.minActivationScore) {
                     hudInference.innerText = recognizedTargetName + " 検出 (" + visualConfidence + ")";
                     hudInference.style.color = topClassId === 0 ? "#12b886" : "#228be6";
