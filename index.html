@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>mediapipeAR - Lightweight Monitor Tracking</title>
+    <title>mediapipeAR - Advanced Monitor Tracking</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        /* カメラ、解析描画用、3D描画用のキャンバスを画面いっぱいに重ねる */
+        /* 全てのレイヤーを完全に同じサイズで重ねて歪みを防止 */
         #webcam, #canvasOutput, #webgl-canvas {
             position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover;
         }
-        #canvasOutput { opacity: 0.6; z-index: 5; pointer-events: none; } /* 検出枠線を重ねる */
+        #canvasOutput { opacity: 0.8; z-index: 5; pointer-events: none; }
         #webgl-canvas { z-index: 10; pointer-events: none; }
         
         #ui-layer {
@@ -29,7 +29,7 @@
 </head>
 <body>
 
-    <video id="webcam" autoplay playsinline muted style="display:none;"></video>
+    <video id="webcam" autoplay playsinline muted></video>
     <canvas id="canvasOutput"></canvas>
     <canvas id="webgl-canvas"></canvas>
 
@@ -39,7 +39,7 @@
     </div>
 
     <div id="loading-ui">
-        <p id="loading-text">超軽量モニター検出AR</p>
+        <p id="loading-text">高画質・高精度モニター検出AR</p>
         <button id="start-btn">カメラを許可してスタート</button>
     </div>
 
@@ -53,25 +53,40 @@
         const loadingUi = document.getElementById('loading-ui');
 
         let scene, camera, renderer, boxMesh;
-        const WIDTH = 320; // 処理高速化のため低解像度でスキャン
-        const HEIGHT = 240;
+        let trackWidth = 320; // 内部解析用解像度 (軽さを維持)
+        let trackHeight = 240;
 
-        // Three.js初期化
         function initThree() {
             const width = window.innerWidth;
             const height = window.innerHeight;
             scene = new THREE.Scene();
+            
+            // 画面比率に合わせたカメラ設定で3Dの伸び縮みを防ぐ
             camera = new THREE.OrthographicCamera(-width / 2, width / 2, height / 2, -height / 2, 0.1, 1000);
             camera.position.z = 10;
 
             renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true });
             renderer.setSize(width, height);
+            renderer.setPixelRatio(window.devicePixelRatio);
             
             const geometry = new THREE.BoxGeometry(60, 60, 60);
             const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
             boxMesh = new THREE.Mesh(geometry, material);
             boxMesh.visible = false;
             scene.add(boxMesh);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            camera.left = -width / 2;
+            camera.right = width / 2;
+            camera.top = height / 2;
+            camera.bottom = -height / 2;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
         }
 
         startBtn.addEventListener('click', async () => {
@@ -79,14 +94,20 @@
             initThree();
 
             try {
+                // 1. 高画質(720p)かつ背面のメインカメラを確実に指定して歪みを防止
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment", width: WIDTH, height: HEIGHT } 
+                    video: { 
+                        facingMode: "environment", 
+                        width: { ideal: 1280 }, 
+                        height: { ideal: 720 } 
+                    } 
                 });
                 video.srcObject = stream;
                 await video.play();
 
-                canvasOutput.width = WIDTH;
-                canvasOutput.height = HEIGHT;
+                // 2. 描画用キャンバスを実際の画面（スマホ）の表示領域と完全に一致させる
+                canvasOutput.width = window.innerWidth;
+                canvasOutput.height = window.innerHeight;
 
                 statusText.innerText = "Tracking Active";
                 requestAnimationFrame(trackMonitor);
@@ -96,30 +117,40 @@
             }
         });
 
-        // 外部ライブラリを使わない、標準Webブラウザ高速モニター追従アルゴリズム
         function trackMonitor() {
             if (video.readyState >= video.HAVE_CURRENT_DATA) {
-                // 1. キャンバスに映像を描画してピクセルデータを直接取得
-                ctxOutput.drawImage(video, 0, 0, WIDTH, HEIGHT);
-                const frame = ctxOutput.getImageData(0, 0, WIDTH, HEIGHT);
+                const screenWidth = window.innerWidth;
+                const screenHeight = window.innerHeight;
+                
+                // キャンバスサイズが画面とズレていたら自動修正
+                if(canvasOutput.width !== screenWidth) {
+                    canvasOutput.width = screenWidth;
+                    canvasOutput.height = screenHeight;
+                }
+
+                // 画面全体の高画質映像をクリアに描画
+                ctxOutput.clearRect(0, 0, screenWidth, screenHeight);
+                ctxOutput.drawImage(video, 0, 0, screenWidth, screenHeight);
+
+                // メモリ負荷を下げつつ精密に走査するため、画面のピクセルデータを取得
+                const frame = ctxOutput.getImageData(0, 0, screenWidth, screenHeight);
                 const data = frame.data;
 
-                // モニター（一般的に部屋の背景より暗い、または特定の黒いベゼル枠）の境界線を走査
-                let minX = WIDTH, maxX = 0, minY = HEIGHT, maxY = 0;
+                let minX = screenWidth, maxX = 0, minY = screenHeight, maxY = 0;
                 let detectedPixels = 0;
 
-                // 粗めのステップでピクセルを高速スキャン（負荷対策）
-                for (let y = 0; y < HEIGHT; y += 4) {
-                    for (let x = 0; x < WIDTH; x += 4) {
-                        const idx = (y * WIDTH + x) * 4;
+                // スキャンのステップを細かくし、検知力をアップ
+                const step = 8; 
+                for (let y = 0; y < screenHeight; y += step) {
+                    for (let x = 0; x < screenWidth; x += step) {
+                        const idx = (y * screenWidth + x) * 4;
                         const r = data[idx];
                         const g = data[idx + 1];
                         const b = data[idx + 2];
 
-                        // モニターのベゼル（黒〜暗いグレーの四角い枠）を簡易判定
-                        // 輝度が低く、色がニュートラルな領域をターゲットにする
+                        // モニターのベゼル（暗い枠）の基準
                         const brightness = (r + g + b) / 3;
-                        if (brightness < 60 && Math.abs(r - g) < 15 && Math.abs(g - b) < 15) {
+                        if (brightness < 65 && Math.abs(r - g) < 12 && Math.abs(g - b) < 12) {
                             if (x < minX) minX = x;
                             if (x > maxX) maxX = x;
                             if (y < minY) minY = y;
@@ -129,32 +160,56 @@
                     }
                 }
 
-                // ある程度の大きさの「暗い四角い塊」が捉えられているか検証
                 const areaWidth = maxX - minX;
                 const areaHeight = maxY - minY;
 
-                if (detectedPixels > 100 && areaWidth > 60 && areaHeight > 45) {
+                let isRealMonitor = false;
+
+                // 【誤認識対策ロジック】暗い塊を見つけたら、モニターの条件を満たしているか厳格チェック
+                if (detectedPixels > 50 && areaWidth > 120 && areaHeight > 90) {
+                    
+                    // 条件①: アスペクト比の検証（横幅の方が長く、極端な細長ではないこと）
+                    const aspect = areaWidth / areaHeight;
+                    if (aspect >= 1.1 && aspect <= 2.2) {
+                        
+                        // 条件②: コントラスト（明暗差）の検証
+                        // 検出した四角形の「中心付近」の明るさをサンプリング
+                        const cx = Math.floor(minX + areaWidth / 2);
+                        const cy = Math.floor(minY + areaHeight / 2);
+                        const centerIdx = (cy * screenWidth + cx) * 4;
+                        
+                        if (centerIdx < data.length) {
+                            const cr = data[centerIdx];
+                            const cg = data[centerIdx + 1];
+                            const cb = data[centerIdx + 2];
+                            const centerBrightness = (cr + cg + cb) / 3;
+
+                            // モニターの画面（中心）が、外枠のベゼル（暗さ65以下）よりも明らかに明るいか判定
+                            if (centerBrightness > 85) {
+                                isRealMonitor = true;
+                            }
+                        }
+                    }
+                }
+
+                // モニターの条件をすべてクリアした場合のみARを表示
+                if (isRealMonitor) {
                     scanResultText.innerText = "Monitor Detected";
                     scanResultText.style.color = "#00ffff";
 
-                    // 検出された四角い外枠を画面に線で描画
+                    // 捉えたモニターの枠に綺麗な緑の線を引く
                     ctxOutput.strokeStyle = "#00ff00";
-                    ctxOutput.lineWidth = 3;
+                    ctxOutput.lineWidth = 4;
                     ctxOutput.strokeRect(minX, minY, areaWidth, areaHeight);
 
-                    // 四角形の中心点を計算
                     const centerX = minX + (areaWidth / 2);
                     const centerY = minY + (areaHeight / 2);
 
-                    // スキャン座標(320x240)からスマホの画面サイズに変換
-                    const screenWidth = window.innerWidth;
-                    const screenHeight = window.innerHeight;
+                    // 3D空間の座標系へ滑らかにマッピング
+                    const targetX = ((centerX / screenWidth) - 0.5) * screenWidth;
+                    const targetY = (0.5 - (centerY / screenHeight)) * screenHeight;
 
-                    // 【仕様書 7.2】 スムージングを適用してがたつきを低減
-                    const targetX = ((centerX / WIDTH) - 0.5) * screenWidth;
-                    const targetY = (0.5 - (centerY / HEIGHT)) * screenHeight;
-
-                    // 簡易EMAスムージング (α = 0.3)
+                    // EMAスムージングを適用 (仕様書 7.2: α=0.3)
                     boxMesh.position.x = 0.3 * targetX + 0.7 * boxMesh.position.x;
                     boxMesh.position.y = 0.3 * targetY + 0.7 * boxMesh.position.y;
                     
@@ -165,7 +220,6 @@
                     boxMesh.visible = false;
                 }
 
-                // 3Dオブジェクトをレンダリング
                 if (boxMesh.visible) {
                     boxMesh.rotation.x += 0.02;
                     boxMesh.rotation.y += 0.02;
