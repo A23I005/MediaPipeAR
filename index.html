@@ -3,21 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deep Neural Network Monitor Recognition AR System (2-Class Mode)</title>
+    <title>AI Monitor Recognizer</title>
     <style>
-        /* ==========================================
-           Core System Layout & Reset Style Sheets
-           ========================================== */
         body {
             margin: 0;
             padding: 0;
             overflow: hidden;
             background-color: #0d0f12;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
             user-select: none;
             -webkit-user-select: none;
         }
-
         #canvasOutput, #webgl-canvas {
             position: absolute;
             top: 0;
@@ -28,10 +24,6 @@
         }
         #canvasOutput { z-index: 5; }
         #webgl-canvas { z-index: 10; pointer-events: none; }
-
-        /* ==========================================
-           Advanced Control Dashboard UI
-           ========================================== */
         #dashboard {
             position: absolute;
             z-index: 100;
@@ -46,11 +38,9 @@
             font-size: 13px;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
             max-height: 32vh;
             overflow-y: auto;
         }
-
         .section-title {
             font-weight: 700;
             color: #4dabf7;
@@ -61,32 +51,28 @@
             padding-bottom: 4px;
             font-size: 11px;
         }
-
         .grid-container {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 12px;
         }
-
         .status-item {
             background: rgba(255, 255, 255, 0.04);
             padding: 10px;
             border-radius: 8px;
             border: 1px solid rgba(255, 255, 255, 0.03);
         }
-
         .status-val {
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: monospace;
             font-size: 15px;
             font-weight: 700;
             margin-top: 4px;
         }
-
         #console-log {
             grid-column: span 2;
             background: #07080a;
             color: #40c057;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-family: monospace;
             padding: 10px;
             border-radius: 6px;
             height: 70px;
@@ -96,10 +82,6 @@
             border: 1px solid rgba(64, 192, 87, 0.2);
             box-sizing: border-box;
         }
-
-        /* ==========================================
-           Startup Data Engine Setup Console
-           ========================================== */
         #setup-screen {
             position: absolute;
             z-index: 200;
@@ -117,7 +99,6 @@
             padding: 24px;
             box-sizing: border-box;
         }
-
         .app-card {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -130,18 +111,15 @@
             -webkit-backdrop-filter: blur(20px);
             box-sizing: border-box;
         }
-
         h1 {
             margin: 0 0 12px 0;
-            font-size: 25px;
+            font-size: 24px;
             font-weight: 800;
-            letter-spacing: -0.5px;
             color: #e3fafc;
         }
-
         .description {
             color: #909296;
-            font-size: 13.5px;
+            font-size: 13px;
             line-height: 1.6;
             margin-bottom: 35px;
             text-align: left;
@@ -150,7 +128,6 @@
             border-radius: 8px;
             border-left: 3px solid #228be6;
         }
-
         .progress-bar-container {
             width: 100%;
             background-color: rgba(255, 255, 255, 0.08);
@@ -159,9 +136,7 @@
             margin-bottom: 24px;
             overflow: hidden;
             display: none;
-            border: 1px solid rgba(255,255,255,0.05);
         }
-
         .progress-bar-fill {
             height: 100%;
             width: 0%;
@@ -169,10 +144,8 @@
             border-radius: 5px;
             transition: width 0.15s ease-out;
         }
-
         .action-btn {
             background: linear-gradient(135deg, #228be6 0%, #1c7ed6 100%);
-            background-color: #1c7ed6;
             color: #ffffff;
             border: none;
             padding: 18px 32px;
@@ -180,27 +153,14 @@
             font-weight: 700;
             border-radius: 10px;
             cursor: pointer;
-            box-shadow: 0 5px 20px rgba(28, 126, 214, 0.35);
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             width: 100%;
             box-sizing: border-box;
-            letter-spacing: 0.5px;
         }
-
-        .action-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(28, 126, 214, 0.5);
-            background-color: #228be6;
-        }
-
         .action-btn:disabled {
             background: #343a40 !important;
-            box-shadow: none !important;
-            cursor: not-allowed;
-            transform: none !important;
             color: #868e96;
+            cursor: not-allowed;
         }
-
         #inference-hud {
             position: absolute;
             bottom: 30px;
@@ -214,14 +174,10 @@
             color: #ffffff;
             font-size: 16px;
             font-weight: 700;
-            letter-spacing: 1px;
             text-align: center;
             pointer-events: none;
-            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.6);
             display: none;
             min-width: 280px;
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
@@ -250,7 +206,7 @@
             </div>
             <div class="status-item" style="grid-column: span 2;">
                 <div class="section-title">Neural Network Loss / Accuracy Logs</div>
-                <div id="matrix-stats" style="font-family: monospace; font-size:11px; color:#74c0fc; line-height: 1.4;">Ready for computing cycles.</div>
+                <div id="matrix-stats" style="font-family: monospace; font-size:11px; color:#74c0fc; line-height: 1.4;">Ready.</div>
             </div>
             <div id="console-log">Initializing runtime framework environment...</div>
         </div>
@@ -260,17 +216,15 @@
         <div class="app-card">
             <h1>Advanced AI Monitor Recognizer</h1>
             <div class="description">
-                <strong>【2クラス・各10枚高速テストモード】</strong><br>
-                Shapeサイズエラー（1024固定化）に対応した修正ビルドです。計20枚のデータでAR稼働テストを行います。
+                <strong>【2クラス高速テストモード】</strong><br>
+                ビルドエラー対策と、MobileNet V2によるShape不一致エラー(1024次元固定化)を修正した安定版パッチです。
             </div>
-            
             <div class="progress-bar-container" id="p-container">
                 <div class="progress-bar-fill" id="p-fill"></div>
             </div>
             <div id="status-label" style="margin-bottom: 24px; font-size: 13px; color: #a6a7ab; font-family: monospace;">
                 System Core Integration Pipeline Standby.
             </div>
-            
             <button class="action-btn" id="master-btn">計20枚の画像で高速AI学習を開始</button>
         </div>
     </div>
@@ -295,7 +249,7 @@
         const viewMatrixStats = document.getElementById('matrix-stats');
 
         const SystemWeightsConfig = {
-            inputLayerNodes: 1024, // MobileNet V2の特定中間レイヤー（1024次元）に固定
+            inputLayerNodes: 1024,
             hiddenLayerNodesAlpha: 256,
             hiddenLayerNodesBeta: 64,
             outputClasses: 2,
@@ -310,10 +264,7 @@
             baseFeatureExtractor: null,
             trainedClassifier: null,
             isEngineReady: false,
-            imageStorage: {
-                monitor1: [],
-                monitor2: []
-            },
+            imageStorage: { monitor1: [], monitor2: [] },
             targetSamplesPerClass: 10,
             resolvedVideoWidth: 1280,
             resolvedVideoHeight: 720,
@@ -326,7 +277,6 @@
             const timestamp = new Date();
             const timeFormat = timestamp.toTimeString().split(' ')[0];
             const structuredMessage = "[" + timeFormat + "] " + text;
-            console.log(structuredMessage);
             areaConsoleLog.innerText = structuredMessage + "\n" + areaConsoleLog.innerText;
         }
 
@@ -349,11 +299,10 @@
         }
 
         async function runDatasetIngestionModule() {
-            pushLog("最新のJPEG拡張子（.jpg / .JPG）に対応したデータロードを開始...");
+            pushLog("データロードを開始...");
             const grandTotalSteps = GlobalState.targetSamplesPerClass * 2;
             let currentProcessedCount = 0;
 
-            // --- クラス 0 : モニター1 (10枚) ---
             for (let i = 1; i <= 10; i++) {
                 const formattedIndex = i < 10 ? "0" + i : "" + i;
                 let ext = (i >= 8) ? ".JPG" : ".jpg";
@@ -361,7 +310,6 @@
                 try {
                     const loadedImg = await fetchImageBlobElement(path);
                     GlobalState.imageStorage.monitor1.push(loadedImg);
-                    pushLog("Loaded: " + path);
                 } catch (err) {
                     pushLog("Failed: " + path);
                 }
@@ -369,7 +317,6 @@
                 advanceUIProgress("Loading monitor1: " + i + " / 10", Math.floor((currentProcessedCount / grandTotalSteps) * 100));
             }
 
-            // --- クラス 1 : モニター2 (10枚) ---
             for (let i = 1; i <= 10; i++) {
                 const formattedIndex = i < 10 ? "0" + i : "" + i;
                 let ext = (i === 1) ? ".jpg" : ".JPG";
@@ -377,71 +324,50 @@
                 try {
                     const loadedImg = await fetchImageBlobElement(path);
                     GlobalState.imageStorage.monitor2.push(loadedImg);
-                    pushLog("Loaded: " + path);
                 } catch (err) {
                     pushLog("Failed: " + path);
                 }
                 currentProcessedCount++;
                 advanceUIProgress("Loading monitor2: " + i + " / 10", Math.floor((currentProcessedCount / grandTotalSteps) * 100));
             }
-
-            const parsedM1 = GlobalState.imageStorage.monitor1.length;
-            const parsedM2 = GlobalState.imageStorage.monitor2.length;
-            pushLog("ロード完了 -> モニター1: " + parsedM1 + "枚, モニター2: " + parsedM2 + "枚");
-
-            if (parsedM1 === 0 && parsedM2 === 0) {
-                throw new Error("画像が一枚も読み込めませんでした。GitHubへの反映状況を確認してください。");
-            }
         }
 
         function compileCustomNeuralClassifier() {
             const customSequentialModel = tf.sequential();
-            
             customSequentialModel.add(tf.layers.dense({
                 units: SystemWeightsConfig.hiddenLayerNodesAlpha,
                 activation: 'relu',
                 inputShape: [SystemWeightsConfig.inputLayerNodes],
                 kernelInitializer: 'varianceScaling'
             }));
-            
             customSequentialModel.add(tf.layers.dropout({ rate: 0.2 }));
-            
             customSequentialModel.add(tf.layers.dense({
                 units: SystemWeightsConfig.hiddenLayerNodesBeta,
                 activation: 'relu',
                 kernelInitializer: 'varianceScaling'
             }));
-            
             customSequentialModel.add(tf.layers.dense({
                 units: SystemWeightsConfig.outputClasses,
                 activation: 'softmax',
                 kernelInitializer: 'varianceScaling'
             }));
 
-            const dynamicOptimizer = tf.train.adam(SystemWeightsConfig.learningRate);
             customSequentialModel.compile({
-                optimizer: dynamicOptimizer,
+                optimizer: tf.train.adam(SystemWeightsConfig.learningRate),
                 loss: 'categoricalCrossentropy',
                 metrics: ['accuracy']
             });
-
             GlobalState.trainedClassifier = customSequentialModel;
-            pushLog("2クラス用カスタムモデルのコンパイルが完了。");
         }
 
-        // MobileNetV2から確実に出力サイズ1024の特徴量レイヤーを抽出するヘルパー
         function getFeatureActivationTensor(inputTensor) {
-            // モバイルブラウザでの不整合を防ぐため、1024次元のグローバルプールレイヤー出力を選択
             const layer = GlobalState.baseFeatureExtractor.model.getLayer('global_average_pooling2d');
             const internalModel = tf.model({inputs: GlobalState.baseFeatureExtractor.model.inputs, outputs: layer.output});
             return internalModel.predict(inputTensor);
         }
 
         async function runModelTrainingOptimization() {
-            pushLog("MobileNet V2 (出力サイズ固定版) をロード中...");
             advanceUIProgress("ベースAIを起動中...", 30);
-            
-            // バージョン2、アルファ1.0に指定してサイズを1024に確実にロック
             GlobalState.baseFeatureExtractor = await mobilenet.load({ version: 2, alpha: 1.0 });
             compileCustomNeuralClassifier();
 
@@ -455,12 +381,10 @@
                         const scaledTensor = tf.image.resizeBilinear(sourceTensor, [224, 224]);
                         const normalizedTensor = scaledTensor.toFloat().sub(127.5).div(127.5);
                         const batchedTensor = normalizedTensor.expandDims(0);
-                        
                         const featureActivation = getFeatureActivationTensor(batchedTensor);
                         const reshapedFeature = featureActivation.reshape([SystemWeightsConfig.inputLayerNodes]);
                         
                         inputFeatureVectors.push(reshapedFeature.clone());
-                        
                         const oneHotArray = [0, 0];
                         oneHotArray[targetClassId] = 1;
                         outputTargetLabels.push(tf.tensor1d(oneHotArray));
@@ -480,7 +404,6 @@
             inputFeatureVectors.forEach(t => t.dispose());
             outputTargetLabels.forEach(t => t.dispose());
 
-            pushLog("学習演算ループを開始...");
             await tf.nextFrame();
 
             await GlobalState.trainedClassifier.fit(trainingX, trainingY, {
@@ -500,46 +423,31 @@
             trainingX.dispose();
             trainingY.dispose();
             GlobalState.isEngineReady = true;
-            pushLog("AIの高速学習最適化が完了しました！");
         }
 
         function setupArGraphicsEnvironment() {
             const viewportWidth = window.innerWidth;
             const viewportHeight = window.innerHeight;
-            
             glScene = new THREE.Scene();
-            glCamera = new THREE.OrthographicCamera(
-                -viewportWidth / 2, viewportWidth / 2, 
-                viewportHeight / 2, -viewportHeight / 2, 
-                0.1, 2000
-            );
+            glCamera = new THREE.OrthographicCamera(-viewportWidth/2, viewportWidth/2, viewportHeight/2, -viewportHeight/2, 0.1, 2000);
             glCamera.position.z = 600;
 
-            glRenderer = new THREE.WebGLRenderer({
-                canvas: document.getElementById('webgl-canvas'),
-                alpha: true,
-                antialias: true
-            });
+            glRenderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true, antialias: true });
             glRenderer.setSize(viewportWidth, viewportHeight);
             glRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
             const geometryCube = new THREE.BoxGeometry(160, 160, 160);
             const edgeInstance = new THREE.EdgesGeometry(geometryCube);
             const materialLine = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 3 });
-            
             glTrackingBox = new THREE.LineSegments(edgeInstance, materialLine);
             glTrackingBox.visible = false;
             glScene.add(glTrackingBox);
         }
 
         async function runHardwareCameraLinkage() {
-            const mediaConstraints = {
-                video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-                audio: false
-            };
+            const mediaConstraints = { video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
             const streamCapture = await navigator.mediaDevices.getUserMedia(mediaConstraints);
             domVideo.srcObject = streamCapture;
-            
             await new Promise((resolve) => {
                 domVideo.onloadedmetadata = () => {
                     GlobalState.resolvedVideoWidth = domVideo.videoWidth || 1280;
@@ -556,12 +464,9 @@
             const vW = GlobalState.resolvedVideoWidth;
             const vH = GlobalState.resolvedVideoHeight;
             return {
-                x: Math.floor(vW * 0.20),
-                y: Math.floor(vH * 0.20),
-                width: Math.floor(vW * 0.60),
-                height: Math.floor(vH * 0.60),
-                midpointX: Math.floor(vW / 2),
-                midpointY: Math.floor(vH / 2)
+                x: Math.floor(vW * 0.20), y: Math.floor(vH * 0.20),
+                width: Math.floor(vW * 0.60), height: Math.floor(vH * 0.60),
+                midpointX: Math.floor(vW / 2), midpointY: Math.floor(vH / 2)
             };
         }
 
@@ -574,17 +479,12 @@
                     const processedFrame = tf.image.resizeBilinear(canvasFramePixels, [224, 224]);
                     const standardizedFrame = processedFrame.toFloat().sub(127.5).div(127.5);
                     const singleBatchFrame = standardizedFrame.expandDims(0);
-                    
                     const activationFeatures = getFeatureActivationTensor(singleBatchFrame);
                     const flatFeatures = activationFeatures.reshape([SystemWeightsConfig.inputLayerNodes]);
-                    const modelInputTensor = flatFeatures.expandDims(0);
-                    
-                    const inferenceOutput = GlobalState.trainedClassifier.predict(modelInputTensor);
-                    return inferenceOutput.dataSync();
+                    return GlobalState.trainedClassifier.predict(flatFeatures.expandDims(0)).dataSync();
                 });
 
-                let topClassId = 0;
-                let topProbabilityScore = -1;
+                let topClassId = 0, topProbabilityScore = -1;
                 for (let i = 0; i < softmaxArrayOutput.length; i++) {
                     if (softmaxArrayOutput[i] > topProbabilityScore) {
                         topProbabilityScore = softmaxArrayOutput[i];
@@ -594,34 +494,26 @@
 
                 const visualConfidence = (topProbabilityScore * 100).toFixed(2) + "%";
                 const humanReadableClasses = ["モニター1", "モニター2"];
-                const recognizedTargetName = humanReadableClasses[topClassId];
-
-                viewPredictClass.innerText = recognizedTargetName;
+                viewPredictClass.innerText = humanReadableClasses[topClassId];
                 viewPredictScore.innerText = visualConfidence;
 
                 if (topProbabilityScore > SystemWeightsConfig.minActivationScore) {
-                    hudInference.innerText = recognizedTargetName + " 検出 (" + visualConfidence + ")";
+                    hudInference.innerText = humanReadableClasses[topClassId] + " 検出 (" + visualConfidence + ")";
                     hudInference.style.color = topClassId === 0 ? "#12b886" : "#228be6";
                     
                     const bounds = calculateScreenGeometricCenter();
-                    
                     domCtxOut.strokeStyle = topClassId === 0 ? "#12b886" : "#228be6";
                     domCtxOut.lineWidth = 6;
                     domCtxOut.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
 
-                    const windowW = window.innerWidth;
-                    const windowH = window.innerHeight;
+                    const windowW = window.innerWidth, windowH = window.innerHeight;
                     const computedThreeX = ((bounds.midpointX / GlobalState.resolvedVideoWidth) - 0.5) * windowW;
                     const computedThreeY = (0.5 - (bounds.midpointY / GlobalState.resolvedVideoHeight)) * windowH;
 
-                    const filterFactor = SystemWeightsConfig.smoothingFilterFactor;
-                    glTrackingBox.position.x = filterFactor * computedThreeX + (1.0 - filterFactor) * glTrackingBox.position.x;
-                    glTrackingBox.position.y = filterFactor * computedThreeY + (1.0 - filterFactor) * glTrackingBox.position.y;
+                    glTrackingBox.position.x = SystemWeightsConfig.smoothingFilterFactor * computedThreeX + (1.0 - SystemWeightsConfig.smoothingFilterFactor) * glTrackingBox.position.x;
+                    glTrackingBox.position.y = SystemWeightsConfig.smoothingFilterFactor * computedThreeY + (1.0 - SystemWeightsConfig.smoothingFilterFactor) * glTrackingBox.position.y;
                     
-                    if(glTrackingBox.material) {
-                        glTrackingBox.material.color.setHex(topClassId === 0 ? 0x12b886 : 0x228be6);
-                    }
-
+                    if(glTrackingBox.material) glTrackingBox.material.color.setHex(topClassId === 0 ? 0x12b886 : 0x228be6);
                     glTrackingBox.visible = true;
                     glTrackingBox.rotation.x += 0.02;
                     glTrackingBox.rotation.y += 0.02;
@@ -630,10 +522,8 @@
                     hudInference.style.color = "#adb5bd";
                     glTrackingBox.visible = false;
                 }
-
                 glRenderer.render(glScene, glCamera);
             }
-
             GlobalState.frameLoopId = requestAnimationFrame(runRealtimeInferenceThreadLoop);
         }
 
@@ -642,23 +532,18 @@
             try {
                 viewEngineState.innerText = "LOADING";
                 await runDatasetIngestionModule();
-                
                 viewEngineState.innerText = "TRAINING";
                 await runModelTrainingOptimization();
-                
                 setupArGraphicsEnvironment();
                 await runHardwareCameraLinkage();
 
                 document.getElementById('setup-screen').style.display = 'none';
                 panelDashboard.style.display = 'block';
                 hudInference.style.display = 'block';
-
                 viewEngineState.innerText = "RUNNING";
-                await runRealtimeInferenceThreadLoop();
-
-            } catch (pipelineException) {
-                pushLog("Error: " + pipelineException.message);
-                alert("起動エラー:\n" + pipelineException.message);
+                runRealtimeInferenceThreadLoop();
+            } catch (ex) {
+                alert("起動エラー:\n" + ex.message);
                 btnMasterCtrl.disabled = false;
             }
         }
@@ -667,12 +552,9 @@
 
         window.addEventListener('resize', () => {
             if (glRenderer && glCamera) {
-                const currentW = window.innerWidth;
-                const currentH = window.innerHeight;
-                glCamera.left = -currentW / 2;
-                glCamera.right = currentW / 2;
-                glCamera.top = currentH / 2;
-                glCamera.bottom = -currentH / 2;
+                const currentW = window.innerWidth, currentH = window.innerHeight;
+                glCamera.left = -currentW / 2; glCamera.right = currentW / 2;
+                glCamera.top = currentH / 2; glCamera.bottom = -currentH / 2;
                 glCamera.updateProjectionMatrix();
                 glRenderer.setSize(currentW, currentH);
             }
