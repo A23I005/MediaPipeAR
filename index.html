@@ -3,150 +3,247 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hand Tracking AR</title>
-    <link rel="stylesheet" href="style.css">
+    <title>mediapipeAR - Test</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        /* カメラ映像と3D用Canvasを画面いっぱいに重ねる */
+        #webcam, #webgl-canvas {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover;
+        }
+        #webgl-canvas { pointer-events: none; z-index: 10; }
+        /* 状態確認用の簡易デバッグUI */
+        #ui-layer {
+            position: absolute; z-index: 20; color: white; top: 20px; left: 20px;
+            background: rgba(0,0,0,0.6); padding: 12px; border-radius: 8px; pointer-events: none;
+            font-size: 14px; line-height: 1.5;
+        }
+        /* 起動・ローディングUI */
+        #loading-ui {
+            position: absolute; z-index: 30; color: white; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center;
+        }
+        button { padding: 14px 28px; font-size: 16px; border-radius: 5px; border: none; cursor: pointer; background: #007bff; color: white; font-weight: bold; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js" crossorigin="anonymous"></script>
 </head>
 <body>
+
     <video id="webcam" autoplay playsinline></video>
+    <canvas id="webgl-canvas"></canvas>
 
-    <div id="debug-info">システム初期化中...</div>
+    <div id="ui-layer">
+        <div>Status: <span id="status" style="color:#00ff00;">Initializing AI...</span></div>
+        <div>Gesture: <span id="gesture" style="font-weight:bold;">-</span></div>
+    </div>
 
-    <div id="start-ui">
-        <div class="card">
-            <h2>ハンドトラッキングAR</h2>
-            <p>カメラを許可すると、手のひらから恐竜が飛び出します！</p>
-            <button id="start-btn">カメラを許可してARをスタート</button>
-        </div>
+    <div id="loading-ui">
+        <p id="loading-text">AIモデルを読み込み中...</p>
+        <button id="start-btn" style="display:none;">カメラを許可してARをスタート</button>
     </div>
 
     <script>
-        window.addEventListener('error', (event) => {
-            const debugElement = document.getElementById('debug-info');
-            if (debugElement) {
-                // エラーが発生したら、即座に理由を画面に赤文字で出します
-                debugElement.innerText = `【エラー】\n${event.message}\n(${event.filename ? event.filename.split('/').pop() : ''}:${event.lineno})`;
-                debugElement.style.color = "#ff4444";
-            }
-        });
-        window.addEventListener('unhandledrejection', (event) => {
-            const debugElement = document.getElementById('debug-info');
-            if (debugElement) {
-                debugElement.innerText = `【非同期エラー】\n${event.reason}`;
-                debugElement.style.color = "#ff4444";
-            }
-        });
-    </script>
-
-    <script type="module">
-        // スマホで一番安全に、確実に動く世界標準のインポート方式
-        import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js";
-
-        const debugInfo = document.getElementById('debug-info');
         const video = document.getElementById('webcam');
-        const startUI = document.getElementById('start-ui');
         const startBtn = document.getElementById('start-btn');
+        const statusText = document.getElementById('status');
+        const gestureText = document.getElementById('gesture');
+        const loadingUi = document.getElementById('loading-ui');
+        const loadingText = document.getElementById('loading-text');
 
         let gestureRecognizer;
-        let lastVideoTime = -1;
-        let gestureHistory = [];
+        let scene, camera, renderer, boxMesh;
+        
+        // 【仕様書 7.2】 座標平滑化（EMA）の係数 α=0.3
+        const ALPHA = 0.3;
+        let prevX = null;
+        let prevY = null;
 
-        function logStatus(message, percent = null, isError = false) {
-            if (!debugInfo) return;
-            if (percent !== null) {
-                debugInfo.innerText = `[${percent}%] ${message}`;
-            } else {
-                debugInfo.innerText = message;
-            }
-            debugInfo.style.color = isError ? "#ff4444" : "#00ff00"; // 正常なら緑、エラーなら赤
-        }
+        // 【仕様書 7.1】 誤作動防止（デバウンス）用バッファ（過去5フレーム分）
+        const gestureHistory = [];
+        const HISTORY_LIMIT = 5;
 
-        // 初期化処理
-        async function initARSystem() {
-            logStatus("AIライブラリの読み込みに成功！", 20);
+        // 【仕様書 6.3】 出現時エフェクト制御用
+        let isDinoVisible = false;
+        let spawnStartTime = 0;
+        const SPAWN_DURATION = 300; // 0.3秒 (300ミリ秒)
 
+        // ページ読み込み時にMediaPipe（AI）をバックグラウンドで初期化
+        async function initMediaPipe() {
             try {
-                logStatus("WASMエンジンをセットアップ中...", 55);
-                const vision = await FilesetResolver.forVisionTasks(
-                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+                const vision = await mpTasksVision.FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
                 );
-
-                logStatus("AIモデル(約5MB)をダウンロード中...", 80);
-                gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+                gestureRecognizer = await mpTasksVision.GestureRecognizer.createFromOptions(vision, {
                     baseOptions: {
                         modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
                         delegate: "GPU"
                     },
                     runningMode: "VIDEO"
                 });
-
-                logStatus("準備完了！ボタンを押してスタートしてください。", 100);
-                startBtn.addEventListener('click', startCamera);
-
-            } catch (error) {
-                logStatus(`初期化失敗: ${error.message}`, null, true);
+                // 準備完了したらボタンを表示
+                loadingText.style.display = "none";
+                startBtn.style.display = "block";
+                statusText.innerText = "Ready";
+            } catch (err) {
+                console.error(err);
+                loadingText.innerText = "AIの初期化に失敗しました。再読み込みしてください。";
             }
         }
 
-        // カメラ起動処理
-        async function startCamera() {
-            logStatus("カメラへの接続を要求中...");
+        // Three.jsの初期化（3D空間の準備）
+        function initThree() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            scene = new THREE.Scene();
+
+            // 【仕様書 6.3】 2Dスクリーン座標を1対1でマッピングするため平行投影カメラを採用
+            camera = new THREE.OrthographicCamera(-width / 2, width / 2, height / 2, -height / 2, 0.1, 1000);
+            camera.position.z = 10;
+
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(window.devicePixelRatio);
+
+            // 恐竜の代わりの「仮の赤い立方体」を作成
+            const geometry = new THREE.BoxGeometry(60, 60, 60);
+            const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+            boxMesh = new THREE.Mesh(geometry, material);
+            boxMesh.visible = false; // 最初は非表示
+            scene.add(boxMesh);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            camera.left = -width / 2;
+            camera.right = width / 2;
+            camera.top = height / 2;
+            camera.bottom = -height / 2;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+
+        // ユーザーが「スタート」を押したらカメラと3Dを開始
+        startBtn.addEventListener('click', async () => {
+            loadingUi.style.display = 'none';
+            initThree();
+
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-                    audio: false
+                // スマホの背面メインカメラ（environment）を優先的に起動、HD解像度要求
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } 
                 });
                 video.srcObject = stream;
-                
-                startUI.style.display = 'none';
-                logStatus("カメラ接続成功！手を出してください。");
-                video.addEventListener('loadeddata', predictLoop);
-            } catch (error) {
-                logStatus(`カメラ起動エラー: アクセスが拒否されました。`, null, true);
+                video.addEventListener('loadeddata', () => {
+                    statusText.innerText = "Tracking Active";
+                    requestAnimationFrame(renderLoop);
+                });
+            } catch (err) {
+                console.error("カメラ起動エラー:", err);
+                alert("AR体験にはカメラの許可が必要です。URLがHTTPSであることを確認してください。");
             }
-        }
+        });
 
-        // ループ処理
-        function predictLoop() {
-            if (video.currentTime !== lastVideoTime) {
-                lastVideoTime = video.currentTime;
-                try {
-                    const results = gestureRecognizer.recognizeForVideo(video, performance.now());
-                    let currentGesture = "None";
-                    if (results.gestures && results.gestures.length > 0) {
-                        currentGesture = results.gestures[0][0].categoryName;
+        // 毎フレーム実行されるループ処理
+        function renderLoop() {
+            if (video.readyState === video.HAVE_CURRENT_DATA) {
+                const now = performance.now();
+                // MediaPipeで手とジェスチャーを解析
+                const results = gestureRecognizer.recognizeForVideo(video, now);
+
+                let currentGesture = "None";
+                let handDetected = false;
+
+                if (results.gestures && results.gestures.length > 0) {
+                    currentGesture = results.gestures[0][0].categoryName;
+                    handDetected = true;
+                }
+
+                gestureText.innerText = currentGesture;
+
+                // --- 【仕様書 7.1】 誤作動防止（デバウンス）処理 ---
+                gestureHistory.push(currentGesture);
+                if (gestureHistory.length > HISTORY_LIMIT) { gestureHistory.shift(); }
+
+                // 直近の履歴（過去5フレーム内）で「グー(Closed_Fist)」が連続して3フレーム以上あったかを検証
+                let fistCount = 0;
+                let maxContinuousFist = 0;
+                for (let i = 0; i < gestureHistory.length; i++) {
+                    if (gestureHistory[i] === "Closed_Fist") {
+                        fistCount++;
+                        maxContinuousFist = Math.max(maxContinuousFist, fistCount);
+                    } else {
+                        fistCount = 0;
                     }
-                    updateDebounceAndCheckTrigger(currentGesture);
-                } catch (err) {}
-            }
-            requestAnimationFrame(predictLoop);
-        }
+                }
 
-        // グー・パーの判定
-        function updateDebounceAndCheckTrigger(currentGesture) {
-            gestureHistory.push(currentGesture);
-            if (gestureHistory.length > 5) gestureHistory.shift();
+                // 手が検出されている場合の処理
+                if (handDetected && results.landmarks && results.landmarks.length > 0) {
+                    // 【仕様書 6.3】 手のひらの中心点（ランドマーク9番）を取得
+                    const landmark9 = results.landmarks[0][9];
+                    
+                    let targetX = landmark9.x;
+                    let targetY = landmark9.y;
 
-            let fistCount = 0;
-            let maxConsecutiveFist = 0;
-            for (let i = 0; i < gestureHistory.length - 1; i++) {
-                if (gestureHistory[i] === "Closed_Fist") {
-                    fistCount++;
-                    if (fistCount > maxConsecutiveFist) maxConsecutiveFist = fistCount;
+                    // --- 【仕様書 7.2】 座標平滑化（指数移動平均: EMA） ---
+                    if (prevX === null || prevY === null) {
+                        prevX = targetX; prevY = targetY;
+                    }
+                    const smoothX = ALPHA * targetX + (1 - ALPHA) * prevX;
+                    const smoothY = ALPHA * targetY + (1 - ALPHA) * prevY;
+                    prevX = smoothX; prevY = smoothY;
+
+                    // MediaPipeの0〜1の座標系を、Three.jsの画面座標空間にマッピング
+                    const width = window.innerWidth;
+                    const height = window.innerHeight;
+                    
+                    // フロントカメラと背面カメラの鏡像補正（必要に応じて調整）
+                    boxMesh.position.x = (smoothX - 0.5) * width;
+                    boxMesh.position.y = (0.5 - smoothY) * height; // Y軸は上下反転
+
+                    // --- 【仕様書 6.2】 状態遷移トリガー（グーからパーへの変化） ---
+                    if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
+                        // 召喚イベント発火！
+                        isDinoVisible = true;
+                        boxMesh.visible = true;
+                        spawnStartTime = now;
+                    }
+                    // 【仕様書 6.3】 消失処理: 再度「グー」に戻った場合
+                    else if (isDinoVisible && currentGesture === "Closed_Fist") {
+                        isDinoVisible = false;
+                        boxMesh.visible = false;
+                    }
+
+                    // --- 【仕様書 6.3】 出現時エフェクト（0.3秒で滑らかに拡大） ---
+                    if (isDinoVisible) {
+                        const elapsed = now - spawnStartTime;
+                        const progress = Math.min(elapsed / SPAWN_DURATION, 1.0); // 0.0 〜 1.0
+                        boxMesh.scale.set(progress, progress, progress);
+                    }
+
                 } else {
-                    fistCount = 0;
+                    // 【仕様書 6.3】 消失処理: 手が画面外へ外れた場合
+                    isDinoVisible = false;
+                    boxMesh.visible = false;
+                    prevX = null; prevY = null;
                 }
             }
 
-            if (maxConsecutiveFist >= 3 && currentGesture === "Open_Palm") {
-                logStatus("【★恐竜召喚イベント発火！★】");
-                debugInfo.style.color = "#ff00ff";
-            } else {
-                logStatus(`認識中の手: ${currentGesture}`);
+            // 立方体を少し回転させて3Dらしく見せる
+            if (boxMesh.visible) {
+                boxMesh.rotation.x += 0.01;
+                boxMesh.rotation.y += 0.01;
             }
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(renderLoop);
         }
 
-        // システムを起動
-        initARSystem();
+        // 初期化スタート
+        initMediaPipe();
     </script>
 </body>
 </html>
