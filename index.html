@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>mediapipeAR - Monitor Edge Alignment</title>
+    <title>mediapipeAR - Strict Monitor Filter</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         #canvasOutput, #webgl-canvas {
@@ -38,7 +38,7 @@
     </div>
 
     <div id="loading-ui">
-        <p id="loading-text">高精度エッジフィッティングAR (発光体スキャン版)</p>
+        <p id="loading-text">高精度形状フィルタ付き・モニター識別AR8</p>
         <button id="start-btn" disabled style="background:#555;">画像データを解析中...</button>
     </div>
 
@@ -55,10 +55,10 @@
         let videoWidth = 1280;
         let videoHeight = 720;
 
-        // キャッシュバスターを ?v=3 に更新
+        // キャッシュバスターを ?v=4 に更新
         const templates = {
-            monitor1: { src: 'monitor1.png?v=3', avgR: 0, avgG: 0, avgB: 0, isLoaded: false },
-            monitor2: { src: 'monitor2.png?v=3', avgR: 0, avgG: 0, avgB: 0, isLoaded: false }
+            monitor1: { src: 'monitor1.png?v=4', avgR: 0, avgG: 0, avgB: 0, isLoaded: false },
+            monitor2: { src: 'monitor2.png?v=4', avgR: 0, avgG: 0, avgB: 0, isLoaded: false }
         };
 
         async function analyzeTemplates() {
@@ -90,7 +90,7 @@
                         resolve();
                     };
                     img.onerror = () => {
-                        console.warn(`${t.src} をスキップしました。`);
+                        console.warn(`${t.src} の解析をスキップしました。`);
                         resolve();
                     };
                 });
@@ -154,29 +154,38 @@
                 const frame = ctxOutput.getImageData(0, 0, videoWidth, videoHeight);
                 const data = frame.data;
 
-                // 新ロジック: 全画面への広がりを防ぐため、スキャン範囲を画面中央75%に制限
-                const startX = Math.floor(videoWidth * 0.125);
-                const endX = Math.floor(videoWidth * 0.875);
-                const startY = Math.floor(videoHeight * 0.125);
-                const endY = Math.floor(videoHeight * 0.875);
+                // 誤認識を防ぐため、スキャンエリアを画面中心部分（不要な端のノイズカット）に設定
+                const startX = Math.floor(videoWidth * 0.15);
+                const endX = Math.floor(videoWidth * 0.85);
+                const startY = Math.floor(videoHeight * 0.15);
+                const endY = Math.floor(videoHeight * 0.85);
 
                 let minX = videoWidth, maxX = 0, minY = videoHeight, maxY = 0;
-                let lightPixels = 0;
+                let validPoints = 0;
 
-                const step = 8; 
+                const step = 6; // 精細スキャン
                 for (let y = startY; y < endY; y += step) {
                     for (let x = startX; x < endX; x += step) {
                         const idx = (y * videoWidth + x) * 4;
-                        const r = data[idx];
-                        const g = data[idx+1];
-                        const b = data[idx+2];
-                        const brightness = (r + g + b) / 3;
+                        
+                        // 周辺ピクセルとの明暗の「落差（輝度勾配）」を計算（エッジ検出）
+                        const rightIdx = (y * videoWidth + (x + 2)) * 4;
+                        const downIdx = ((y + 2) * videoWidth + x) * 4;
 
-                        // 【変更】暗いベゼルではなく、「一定以上の明るさを持つ発光液晶画面」の輪郭を捉える
-                        if (brightness > 85) {
+                        if (rightIdx >= data.length || downIdx >= data.length) continue;
+
+                        const bCurrent = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+                        const bRight = (data[rightIdx] + data[rightIdx+1] + data[rightIdx+2]) / 3;
+                        const bDown = (data[downIdx] + data[downIdx+1] + data[downIdx+2]) / 3;
+
+                        // 液晶画面とベゼルの境界、またはハッキリした四角形の輪郭（エッジ）を捉える
+                        const edgeX = Math.abs(bCurrent - bRight);
+                        const edgeY = Math.abs(bCurrent - bDown);
+
+                        if (edgeX > 25 || edgeY > 25) {
                             if (x < minX) minX = x; if (x > maxX) maxX = x;
                             if (y < minY) minY = y; if (y > maxY) maxY = y;
-                            lightPixels++;
+                            validPoints++;
                         }
                     }
                 }
@@ -185,44 +194,54 @@
                 let areaHeight = maxY - minY;
                 let identifiedMonitor = null;
 
-                // 画面全体に広がってしまわないよう、最大サイズ制限(全体の80%以下)を追加
-                if (lightPixels > 30 && areaWidth > videoWidth * 0.15 && areaHeight > videoHeight * 0.15 && areaWidth < videoWidth * 0.8 && areaHeight < videoHeight * 0.8) {
+                // 【最重要】形状フィルター
+                if (validPoints > 40 && areaWidth > videoWidth * 0.25 && areaHeight > videoHeight * 0.15) {
                     
-                    const cx = Math.floor(minX + areaWidth / 2);
-                    const cy = Math.floor(minY + areaHeight / 2);
-                    const centerIdx = (cy * videoWidth + cx) * 4;
+                    // アスペクト比（横幅 ÷ 縦幅）を計算
+                    const aspectRatio = areaWidth / areaHeight;
 
-                    if (centerIdx < data.length) {
-                        const currentR = data[centerIdx];
-                        const currentG = data[centerIdx+1];
-                        const currentB = data[centerIdx+2];
+                    // PCモニターの標準的な比率（1.2〜2.2の範囲の横長長方形）である場合のみ通過させる
+                    // これにより、縦に映したキーボードや、全画面の誤認識を一撃でカットします
+                    if (aspectRatio >= 1.2 && aspectRatio <= 2.2) {
+                        
+                        // 輪郭に囲まれた中心エリアの色サンプリング
+                        const cx = Math.floor(minX + areaWidth / 2);
+                        const cy = Math.floor(minY + areaHeight / 2);
+                        const centerIdx = (cy * videoWidth + cx) * 4;
 
-                        let bestMatch = null;
-                        let minDiff = 999999;
+                        if (centerIdx < data.length) {
+                            const currentR = data[centerIdx];
+                            const currentG = data[centerIdx+1];
+                            const currentB = data[centerIdx+2];
 
-                        for (let key in templates) {
-                            const t = templates[key];
-                            if (!t.isLoaded) continue;
+                            let bestMatch = null;
+                            let minDiff = 999999;
 
-                            const diff = Math.abs(currentR - t.avgR) + Math.abs(currentG - t.avgG) + Math.abs(currentB - t.avgB);
-                            if (diff < minDiff) {
-                                minDiff = diff;
-                                bestMatch = key;
+                            for (let key in templates) {
+                                const t = templates[key];
+                                if (!t.isLoaded) continue;
+
+                                const diff = Math.abs(currentR - t.avgR) + Math.abs(currentG - t.avgG) + Math.abs(currentB - t.avgB);
+                                if (diff < minDiff) {
+                                    minDiff = diff;
+                                    bestMatch = key;
+                                }
                             }
-                        }
 
-                        // 厳格なカラーマッチングしきい値
-                        if (bestMatch && minDiff < 140) {
-                            identifiedMonitor = bestMatch === "monitor1" ? "モニター1" : "モニター2";
+                            // カラーマッチングのしきい値を厳格化（誤差100以内）
+                            if (bestMatch && minDiff < 100) {
+                                identifiedMonitor = bestMatch === "monitor1" ? "モニター1" : "モニター2";
+                            }
                         }
                     }
                 }
 
+                // 3. レンダリング・UI反映
                 if (identifiedMonitor) {
                     scanResultText.innerText = `${identifiedMonitor} Detected`;
                     scanResultText.style.color = "#00ffff";
 
-                    // モニターのジャストサイズに合わせて枠線を引く
+                    // モニターの正確な外枠に線を描画
                     ctxOutput.strokeStyle = identifiedMonitor === "モニター1" ? "#00ff00" : "#ffaa00";
                     ctxOutput.lineWidth = 5;
                     ctxOutput.strokeRect(minX, minY, areaWidth, areaHeight);
@@ -235,7 +254,7 @@
                     const targetX = ((centerX / videoWidth) - 0.5) * screenWidth;
                     const targetY = (0.5 - (centerY / videoHeight)) * screenHeight;
 
-                    // スムージング追従
+                    // スムージング追従 [cite: 22]
                     boxMesh.position.x = 0.3 * targetX + 0.7 * boxMesh.position.x;
                     boxMesh.position.y = 0.3 * targetY + 0.7 * boxMesh.position.y;
                     boxMesh.visible = true;
