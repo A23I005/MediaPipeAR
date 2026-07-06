@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>mediapipeAR - High-Precision Monitor Match</title>
+    <title>mediapipeAR - Monitor Edge Alignment</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         #canvasOutput, #webgl-canvas {
@@ -38,7 +38,7 @@
     </div>
 
     <div id="loading-ui">
-        <p id="loading-text">高精度・マルチモニター個別識別AR</p>
+        <p id="loading-text">高精度エッジフィッティングAR (発光体スキャン版)</p>
         <button id="start-btn" disabled style="background:#555;">画像データを解析中...</button>
     </div>
 
@@ -55,14 +55,12 @@
         let videoWidth = 1280;
         let videoHeight = 720;
 
-        // モニターごとの「固有の特徴量（RGB比率）」を保持
-        // キャッシュバスター(?v=2)を追加し、画像の更新を強制反映
+        // キャッシュバスターを ?v=3 に更新
         const templates = {
-            monitor1: { src: 'monitor1.png?v=2', avgR: 0, avgG: 0, avgB: 0, isLoaded: false },
-            monitor2: { src: 'monitor2.png?v=2', avgR: 0, avgG: 0, avgB: 0, isLoaded: false }
+            monitor1: { src: 'monitor1.png?v=3', avgR: 0, avgG: 0, avgB: 0, isLoaded: false },
+            monitor2: { src: 'monitor2.png?v=3', avgR: 0, avgG: 0, avgB: 0, isLoaded: false }
         };
 
-        // 起動時に登録画像のカラーバランスを自動学習
         async function analyzeTemplates() {
             const hiddenCanvas = document.createElement('canvas');
             const hCtx = hiddenCanvas.getContext('2d');
@@ -85,7 +83,6 @@
                             bSum += imgData[i+2];
                             count++;
                         }
-                        // 対象モニターの基準カラーを登録
                         t.avgR = rSum / count;
                         t.avgG = gSum / count;
                         t.avgB = bSum / count;
@@ -115,8 +112,8 @@
             renderer.setSize(width, height);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             
-            const geometry = new THREE.BoxGeometry(70, 70, 70);
-            const material = new THREE.MeshBasicMaterial({ color: 0xff3333, wireframe: false });
+            const geometry = new THREE.BoxGeometry(60, 60, 60);
+            const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
             boxMesh = new THREE.Mesh(geometry, material);
             boxMesh.visible = false;
             scene.add(boxMesh);
@@ -157,36 +154,40 @@
                 const frame = ctxOutput.getImageData(0, 0, videoWidth, videoHeight);
                 const data = frame.data;
 
-                // 1. スマホの縦横向きに対応した高精度外枠スキャン
-                let minX = videoWidth, maxX = 0, minY = videoHeight, maxY = 0;
-                let detectedCount = 0;
+                // 新ロジック: 全画面への広がりを防ぐため、スキャン範囲を画面中央75%に制限
+                const startX = Math.floor(videoWidth * 0.125);
+                const endX = Math.floor(videoWidth * 0.875);
+                const startY = Math.floor(videoHeight * 0.125);
+                const endY = Math.floor(videoHeight * 0.875);
 
-                const step = 8; // スキャンの細かさを向上
-                for (let y = 0; y < videoHeight; y += step) {
-                    for (let x = 0; x < videoWidth; x += step) {
+                let minX = videoWidth, maxX = 0, minY = videoHeight, maxY = 0;
+                let lightPixels = 0;
+
+                const step = 8; 
+                for (let y = startY; y < endY; y += step) {
+                    for (let x = startX; x < endX; x += step) {
                         const idx = (y * videoWidth + x) * 4;
                         const r = data[idx];
                         const g = data[idx+1];
                         const b = data[idx+2];
                         const brightness = (r + g + b) / 3;
 
-                        // モニターのベゼル（黒〜暗いグレーの枠）を検出
-                        if (brightness < 70 && Math.abs(r - g) < 15 && Math.abs(g - b) < 15) {
+                        // 【変更】暗いベゼルではなく、「一定以上の明るさを持つ発光液晶画面」の輪郭を捉える
+                        if (brightness > 85) {
                             if (x < minX) minX = x; if (x > maxX) maxX = x;
                             if (y < minY) minY = y; if (y > maxY) maxY = y;
-                            detectedCount++;
+                            lightPixels++;
                         }
                     }
                 }
 
-                const areaWidth = maxX - minX;
-                const areaHeight = maxY - minY;
+                let areaWidth = maxX - minX;
+                let areaHeight = maxY - minY;
                 let identifiedMonitor = null;
 
-                // 2. 捉えた四角形が「実写内の有効なモニター領域」であるかチェック
-                if (detectedCount > 40 && areaWidth > videoWidth * 0.2 && areaHeight > videoHeight * 0.2) {
+                // 画面全体に広がってしまわないよう、最大サイズ制限(全体の80%以下)を追加
+                if (lightPixels > 30 && areaWidth > videoWidth * 0.15 && areaHeight > videoHeight * 0.15 && areaWidth < videoWidth * 0.8 && areaHeight < videoHeight * 0.8) {
                     
-                    // 捉えた領域の中心部の色を取得
                     const cx = Math.floor(minX + areaWidth / 2);
                     const cy = Math.floor(minY + areaHeight / 2);
                     const centerIdx = (cy * videoWidth + cx) * 4;
@@ -199,12 +200,10 @@
                         let bestMatch = null;
                         let minDiff = 999999;
 
-                        // 各テンプレート画像の色データと比較
                         for (let key in templates) {
                             const t = templates[key];
                             if (!t.isLoaded) continue;
 
-                            // 色相の差分を計算
                             const diff = Math.abs(currentR - t.avgR) + Math.abs(currentG - t.avgG) + Math.abs(currentB - t.avgB);
                             if (diff < minDiff) {
                                 minDiff = diff;
@@ -212,21 +211,20 @@
                             }
                         }
 
-                        // 色の近似度が許容範囲内であれば、個別モニターを特定
-                        if (bestMatch && minDiff < 120) {
+                        // 厳格なカラーマッチングしきい値
+                        if (bestMatch && minDiff < 140) {
                             identifiedMonitor = bestMatch === "monitor1" ? "モニター1" : "モニター2";
                         }
                     }
                 }
 
-                // 3. UI表示および3D空間へのレンダリングマッピング
                 if (identifiedMonitor) {
                     scanResultText.innerText = `${identifiedMonitor} Detected`;
                     scanResultText.style.color = "#00ffff";
 
-                    // モニターの周りに枠線を引く (モニター1は緑、モニター2はオレンジ)
+                    // モニターのジャストサイズに合わせて枠線を引く
                     ctxOutput.strokeStyle = identifiedMonitor === "モニター1" ? "#00ff00" : "#ffaa00";
-                    ctxOutput.lineWidth = 6;
+                    ctxOutput.lineWidth = 5;
                     ctxOutput.strokeRect(minX, minY, areaWidth, areaHeight);
 
                     const centerX = minX + (areaWidth / 2);
@@ -234,11 +232,10 @@
                     const screenWidth = window.innerWidth;
                     const screenHeight = window.innerHeight;
 
-                    // 縦持ち表示のズレを打ち消すマッピング座標計算
                     const targetX = ((centerX / videoWidth) - 0.5) * screenWidth;
                     const targetY = (0.5 - (centerY / videoHeight)) * screenHeight;
 
-                    // スムージング追従 (α=0.3)
+                    // スムージング追従
                     boxMesh.position.x = 0.3 * targetX + 0.7 * boxMesh.position.x;
                     boxMesh.position.y = 0.3 * targetY + 0.7 * boxMesh.position.y;
                     boxMesh.visible = true;
