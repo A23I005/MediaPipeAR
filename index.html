@@ -6,18 +6,15 @@
     <title>mediapipeAR - Test</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        /* カメラ映像と3D用Canvasを画面いっぱいに重ねる */
         #webcam, #webgl-canvas {
             position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover;
         }
         #webgl-canvas { pointer-events: none; z-index: 10; }
-        /* 状態確認用の簡易デバッグUI */
         #ui-layer {
             position: absolute; z-index: 20; color: white; top: 20px; left: 20px;
             background: rgba(0,0,0,0.6); padding: 12px; border-radius: 8px; pointer-events: none;
-            font-size: 14px; line-height: 1.5;
+            font-size: 14px; line-height: 1.5; max-width: 80vw;
         }
-        /* 起動・ローディングUI */
         #loading-ui {
             position: absolute; z-index: 30; color: white; top: 0; left: 0; width: 100vw; height: 100vh;
             background: rgba(0,0,0,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -55,21 +52,18 @@
         let gestureRecognizer;
         let scene, camera, renderer, boxMesh;
         
-        // 【仕様書 7.2】 座標平滑化（EMA）の係数 α=0.3
         const ALPHA = 0.3;
         let prevX = null;
         let prevY = null;
 
-        // 【仕様書 7.1】 誤作動防止（デバウンス）用バッファ（過去5フレーム分）
         const gestureHistory = [];
         const HISTORY_LIMIT = 5;
 
-        // 【仕様書 6.3】 出現時エフェクト制御用
         let isDinoVisible = false;
         let spawnStartTime = 0;
-        const SPAWN_DURATION = 300; // 0.3秒 (300ミリ秒)
+        const SPAWN_DURATION = 300; 
 
-        // ページ読み込み時にMediaPipe（AI）をバックグラウンドで初期化
+        // AI初期化
         async function initMediaPipe() {
             try {
                 const vision = await FilesetResolver.forVisionTasks(
@@ -88,87 +82,99 @@
                 statusText.innerText = "Ready";
             } catch (err) {
                 console.error(err);
-                loadingText.innerHTML = `AIの初期化に失敗しました。<br><br><span style="color:#ff6b6b; font-size:13px; text-align:left; display:block; background:#222; padding:10px; border-radius:5px; word-break:break-all;">Error: ${err.message}</span>`;
+                loadingText.innerHTML = `AIの初期化に失敗しました。<br><br><span style="color:#ff6b6b; font-size:13px;">Error: ${err.message}</span>`;
             }
         }
 
-        // Three.jsの初期化
+        // Three.js初期化
         function initThree() {
             const width = window.innerWidth;
             const height = window.innerHeight;
-
             scene = new THREE.Scene();
-
-            // 【仕様書 6.3】 平行投影カメラを採用
             camera = new THREE.OrthographicCamera(-width / 2, width / 2, height / 2, -height / 2, 0.1, 1000);
             camera.position.z = 10;
 
             renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true });
             renderer.setSize(width, height);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 負荷軽減
 
-            // 仮の赤い立方体
             const geometry = new THREE.BoxGeometry(60, 60, 60);
             const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
             boxMesh = new THREE.Mesh(geometry, material);
             boxMesh.visible = false;
             scene.add(boxMesh);
-
-            window.addEventListener('resize', onWindowResize);
         }
 
-        function onWindowResize() {
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-            camera.left = -width / 2;
-            camera.right = width / 2;
-            camera.top = height / 2;
-            camera.bottom = -height / 2;
-            camera.updateProjectionMatrix();
-            renderer.setSize(width, height);
-        }
-
-        // スタートボタン押下時
+        // スタートボタン
         startBtn.addEventListener('click', async () => {
             loadingUi.style.display = 'none';
             initThree();
 
             try {
+                // 解像度要求を少し緩めて互換性をアップ
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } 
+                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } } 
                 });
                 video.srcObject = stream;
                 
-                // iOS対策: 明示的に再開をかける
+                // スマホブラウザ向けに動画再生を確実にキックする設定
+                video.setAttribute('autoplay', '');
+                video.setAttribute('muted', '');
+                video.setAttribute('playsinline', '');
+                
                 await video.play();
                 
                 statusText.innerText = "Tracking Active";
+                // ループを開始
                 requestAnimationFrame(renderLoop);
             } catch (err) {
                 console.error("カメラ起動エラー:", err);
-                alert("AR体験にはカメラの許可が必要です。");
+                alert("カメラの起動に失敗しました: " + err.message);
             }
         });
 
-        // 毎フレーム実行されるループ処理
+        // 毎フレームのループ処理（エラー対策強化版）
         function renderLoop() {
-            // 【バグ修正!!】 === から >= に変更し、準備完了(4)の状態でも確実にループが走るように修正
-            if (video.readyState >= video.HAVE_CURRENT_DATA) {
+            try {
+                // ビデオのデータがまだ来ていない場合は、ループを止めずに次のフレームを待つ
+                if (video.readyState < video.HAVE_CURRENT_DATA) {
+                    gestureText.innerText = "Waiting video data...";
+                    requestAnimationFrame(renderLoop);
+                    return;
+                }
+
+                // AI判定が初期化されていない場合の安全弁
+                if (!gestureRecognizer) {
+                    gestureText.innerText = "AI not ready in loop";
+                    requestAnimationFrame(renderLoop);
+                    return;
+                }
+
                 const now = performance.now();
-                const results = gestureRecognizer.recognizeForVideo(video, now);
+                
+                // 【重要】MediaPipeの解析処理（ここがエラーで落ちやすいので対策）
+                let results;
+                try {
+                    results = gestureRecognizer.recognizeForVideo(video, now);
+                } catch (aiErr) {
+                    // 解析に失敗した場合、画面にエラーを出してループを維持する
+                    gestureText.innerHTML = `<span style="color:#ff6b6b;">AI Error: ${aiErr.message}</span>`;
+                    requestAnimationFrame(renderLoop);
+                    return;
+                }
 
                 let currentGesture = "None";
                 let handDetected = false;
 
-                if (results.gestures && results.gestures.length > 0) {
+                if (results && results.gestures && results.gestures.length > 0) {
                     currentGesture = results.gestures[0][0].categoryName;
                     handDetected = true;
                 }
 
-                // 毎フレーム、検出したジェスチャー名（何もなければ None）を表示
+                // 正常に動いていれば、ここで None、Open_Palm、Closed_Fist のいずれかに書き換わる
                 gestureText.innerText = currentGesture;
 
-                // --- 【仕様書 7.1】 デバウンス処理 ---
+                // デバウンス処理
                 gestureHistory.push(currentGesture);
                 if (gestureHistory.length > HISTORY_LIMIT) { gestureHistory.shift(); }
 
@@ -183,14 +189,12 @@
                     }
                 }
 
+                // 位置更新と描画
                 if (handDetected && results.landmarks && results.landmarks.length > 0) {
-                    // 【仕様書 6.3】 ランドマーク9番（手のひら中心）
                     const landmark9 = results.landmarks[0][9];
-                    
                     let targetX = landmark9.x;
                     let targetY = landmark9.y;
 
-                    // --- 【仕様書 7.2】 座標平滑化（EMA） ---
                     if (prevX === null || prevY === null) {
                         prevX = targetX; prevY = targetY;
                     }
@@ -204,19 +208,15 @@
                     boxMesh.position.x = (smoothX - 0.5) * width;
                     boxMesh.position.y = (0.5 - smoothY) * height;
 
-                    // --- 【仕様書 6.2】 状態遷移トリガー（グーからパーへ） ---
                     if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
                         isDinoVisible = true;
                         boxMesh.visible = true;
                         spawnStartTime = now;
-                    }
-                    // 【仕様書 6.3】 消失処理
-                    else if (isDinoVisible && currentGesture === "Closed_Fist") {
+                    } else if (isDinoVisible && currentGesture === "Closed_Fist") {
                         isDinoVisible = false;
                         boxMesh.visible = false;
                     }
 
-                    // --- 【仕様書 6.3】 出現時エフェクト ---
                     if (isDinoVisible) {
                         const elapsed = now - spawnStartTime;
                         const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
@@ -224,19 +224,24 @@
                     }
 
                 } else {
-                    // 【仕様書 6.3】 消失処理（画面外）
                     isDinoVisible = false;
                     boxMesh.visible = false;
                     prevX = null; prevY = null;
                 }
+
+                if (boxMesh.visible) {
+                    boxMesh.rotation.x += 0.01;
+                    boxMesh.rotation.y += 0.01;
+                }
+
+                renderer.render(scene, camera);
+
+            } catch (globalErr) {
+                // ループ内のその他の想定外エラーをキャッチして画面に表示
+                gestureText.innerHTML = `<span style="color:#ff6b6b;">Loop Error: ${globalErr.message}</span>`;
             }
 
-            if (boxMesh.visible) {
-                boxMesh.rotation.x += 0.01;
-                boxMesh.rotation.y += 0.01;
-            }
-
-            renderer.render(scene, camera);
+            // 何があっても次のフレームのループを呼び出す
             requestAnimationFrame(renderLoop);
         }
 
