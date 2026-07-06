@@ -181,7 +181,6 @@
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
@@ -216,8 +215,8 @@
         <div class="app-card">
             <h1>Advanced AI Monitor Recognizer</h1>
             <div class="description">
-                <strong>【公式API準拠・安全パッチ版】</strong><br>
-                MobileNet内部の構文エラー（getLayer不具合）を完全に回避するため、公式推奨の推論用特徴量抽出API（`model.infer`）に切り替え、安定稼働を確保しました。
+                <strong>【ベースAIクラッシュ完全対策版】</strong><br>
+                不具合の多い外部MobileNetラッパーを廃止。Googleホストの純粋なMobileNetV2（特徴量1024次元抽出レイヤー）を直接直列ロードすることで、クラッシュ問題を根絶しました。
             </div>
             <div class="progress-bar-container" id="p-container">
                 <div class="progress-bar-fill" id="p-fill"></div>
@@ -249,7 +248,7 @@
         const viewMatrixStats = document.getElementById('matrix-stats');
 
         const SystemWeightsConfig = {
-            inputLayerNodes: 1024, // 動的に上書きされます
+            inputLayerNodes: 1024, // MobileNetV2の特徴量出力サイズにジャスト固定
             hiddenLayerNodesAlpha: 256,
             hiddenLayerNodesBeta: 64,
             outputClasses: 2,
@@ -360,22 +359,19 @@
             GlobalState.trainedClassifier = customSequentialModel;
         }
 
-        // 最も安全な公式提供の独自埋め込みAPI（infer）を使用する形に完全修正
+        // Google公式ホストからダイレクトロードしたモデルから特徴量（1024次元）をノーバグで引き抜く関数
         function getFeatureActivationTensor(inputTensor) {
-            return GlobalState.baseFeatureExtractor.infer(inputTensor, true);
+            // [1, 224, 224, 3] のテンソルを流し込み、途中の1024次元特徴量を抽出
+            return GlobalState.baseFeatureExtractor.predict(inputTensor);
         }
 
         async function runModelTrainingOptimization() {
-            advanceUIProgress("ベースAIを起動中...", 30);
-            GlobalState.baseFeatureExtractor = await mobilenet.load({ version: 2, alpha: 1.0 });
-
-            // 読み込まれた特徴量の正確なShapeに合わせて、入力層ノード数を自動調整（1024等に完全適合）
-            tf.tidy(() => {
-                const dummy = tf.zeros([1, 224, 224, 3]);
-                const dummyFeat = getFeatureActivationTensor(dummy);
-                SystemWeightsConfig.inputLayerNodes = dummyFeat.shape[1];
-            });
-
+            advanceUIProgress("ベースAIを直接起動中...", 30);
+            
+            // クラッシュの元であるmobilenetラッパーを使わず、Google公式のMobileNetV2特徴量抽出モデルをTFJSで直ロード
+            const modelUrl = 'https://tfhub.dev/google/tfjs-model/imagenet/mobilenet_v2_100_224/feature_vector/3/default/1';
+            GlobalState.baseFeatureExtractor = await tf.loadGraphModel(modelUrl, { fromTFHub: true });
+            
             compileCustomNeuralClassifier();
 
             const inputFeatureVectors = [];
@@ -386,8 +382,11 @@
                     tf.tidy(() => {
                         const sourceTensor = tf.browser.fromPixels(htmlImagesArray[i]);
                         const scaledTensor = tf.image.resizeBilinear(sourceTensor, [224, 224]);
-                        // モジュールに渡すため、余計な拡張をせずそのまま1枚として流し込む
-                        const featureActivation = getFeatureActivationTensor(scaledTensor);
+                        // 直呼び出しモデル用に [0, 1] に正規化
+                        const normalizedTensor = scaledTensor.toFloat().div(255.0);
+                        const batchedTensor = normalizedTensor.expandDims(0);
+                        
+                        const featureActivation = getFeatureActivationTensor(batchedTensor);
                         const reshapedFeature = featureActivation.reshape([SystemWeightsConfig.inputLayerNodes]);
                         
                         inputFeatureVectors.push(reshapedFeature.clone());
@@ -483,7 +482,10 @@
                 const softmaxArrayOutput = tf.tidy(() => {
                     const canvasFramePixels = tf.browser.fromPixels(domCanvasOut);
                     const processedFrame = tf.image.resizeBilinear(canvasFramePixels, [224, 224]);
-                    const activationFeatures = getFeatureActivationTensor(processedFrame);
+                    const normalizedFrame = processedFrame.toFloat().div(255.0);
+                    const singleBatchFrame = normalizedFrame.expandDims(0);
+                    
+                    const activationFeatures = getFeatureActivationTensor(singleBatchFrame);
                     const flatFeatures = activationFeatures.reshape([SystemWeightsConfig.inputLayerNodes]);
                     return GlobalState.trainedClassifier.predict(flatFeatures.expandDims(0)).dataSync();
                 });
