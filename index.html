@@ -20,6 +20,14 @@
             background: rgba(0,0,0,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center;
             padding: 20px; box-sizing: border-box; text-align: center;
         }
+        #text-input-panel {
+            position: absolute; z-index: 35; left: 20px; bottom: 20px;
+            background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px;
+            display: flex; gap: 8px; align-items: center;
+        }
+        #text-input-panel input {
+            padding: 8px 10px; border: none; border-radius: 5px; min-width: 180px;
+        }
         button { padding: 14px 28px; font-size: 16px; border-radius: 5px; border: none; cursor: pointer; background: #007bff; color: white; font-weight: bold; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -39,6 +47,11 @@
         <button id="start-btn" style="display:none;">カメラを許可してARをスタート</button>
     </div>
 
+    <div id="text-input-panel">
+        <input id="text-input" type="text" value="Hello" maxlength="20" />
+        <button id="apply-text-btn">反映</button>
+    </div>
+
     <script type="module">
         import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
@@ -48,9 +61,12 @@
         const gestureText = document.getElementById('gesture');
         const loadingUi = document.getElementById('loading-ui');
         const loadingText = document.getElementById('loading-text');
+        const textInput = document.getElementById('text-input');
+        const applyTextBtn = document.getElementById('apply-text-btn');
 
         let gestureRecognizer;
-        let scene, camera, renderer, boxMesh;
+        let scene, camera, renderer, textMesh;
+        let textContent = 'Hello';
         
         const ALPHA = 0.3;
         let prevX = null;
@@ -96,14 +112,53 @@
 
             renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true });
             renderer.setSize(width, height);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 負荷軽減
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-            const geometry = new THREE.BoxGeometry(60, 60, 60);
-            const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
-            boxMesh = new THREE.Mesh(geometry, material);
-            boxMesh.visible = false;
-            scene.add(boxMesh);
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 1024;
+            canvas.height = 256;
+            context.fillStyle = '#ffffff';
+            context.font = 'bold 180px sans-serif';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(textContent, canvas.width / 2, canvas.height / 2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+            const geometry = new THREE.PlaneGeometry(220, 55);
+            textMesh = new THREE.Mesh(geometry, material);
+            textMesh.visible = false;
+            scene.add(textMesh);
         }
+
+        function updateTextMesh() {
+            if (!textMesh) return;
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 1024;
+            canvas.height = 256;
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            context.fillStyle = '#ffffff';
+            context.font = 'bold 180px sans-serif';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(textContent, canvas.width / 2, canvas.height / 2);
+            textMesh.material.map = new THREE.CanvasTexture(canvas);
+            textMesh.material.needsUpdate = true;
+        }
+
+        applyTextBtn.addEventListener('click', () => {
+            textContent = textInput.value || 'Hello';
+            updateTextMesh();
+        });
+
+        textInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                textContent = textInput.value || 'Hello';
+                updateTextMesh();
+            }
+        });
 
         // スタートボタン
         startBtn.addEventListener('click', async () => {
@@ -204,34 +259,33 @@
 
                     const width = window.innerWidth;
                     const height = window.innerHeight;
-                    
-                    boxMesh.position.x = (smoothX - 0.5) * width;
-                    boxMesh.position.y = (0.5 - smoothY) * height;
+
+                    if (textMesh) {
+                        textMesh.position.x = (smoothX - 0.5) * width;
+                        textMesh.position.y = (0.5 - smoothY) * height;
+                        textMesh.position.z = 0;
+                    }
 
                     if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
                         isDinoVisible = true;
-                        boxMesh.visible = true;
+                        if (textMesh) textMesh.visible = true;
                         spawnStartTime = now;
                     } else if (isDinoVisible && currentGesture === "Closed_Fist") {
                         isDinoVisible = false;
-                        boxMesh.visible = false;
+                        if (textMesh) textMesh.visible = false;
                     }
 
-                    if (isDinoVisible) {
+                    if (isDinoVisible && textMesh) {
                         const elapsed = now - spawnStartTime;
                         const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
-                        boxMesh.scale.set(progress, progress, progress);
+                        textMesh.scale.set(progress, progress, progress);
+                        textMesh.rotation.y += 0.02;
                     }
 
                 } else {
                     isDinoVisible = false;
-                    boxMesh.visible = false;
+                    if (textMesh) textMesh.visible = false;
                     prevX = null; prevY = null;
-                }
-
-                if (boxMesh.visible) {
-                    boxMesh.rotation.x += 0.01;
-                    boxMesh.rotation.y += 0.01;
                 }
 
                 renderer.render(scene, camera);
