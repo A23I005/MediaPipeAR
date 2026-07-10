@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>mediapipeAR - Custom GLB</title>
+    <title>mediapipeAR - Custom GLB (Debug)</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         #webcam, #webgl-canvas {
@@ -14,6 +14,14 @@
             position: absolute; z-index: 20; color: white; top: 20px; left: 20px;
             background: rgba(0,0,0,0.6); padding: 12px; border-radius: 8px; pointer-events: none;
             font-size: 14px; line-height: 1.5; max-width: 80vw;
+        }
+        /* 【追加】デバッグ表示用のスタイル（画面右上） */
+        #debug-display {
+            position: absolute; z-index: 25; top: 20px; right: 20px;
+            background: rgba(0, 0, 0, 0.8); color: #39ff14; padding: 10px 20px;
+            border-radius: 5px; font-weight: bold; font-size: 16px;
+            border: 2px solid #39ff14; pointer-events: none;
+            display: none; /* 初期状態は非表示 */
         }
         #loading-ui {
             position: absolute; z-index: 30; color: white; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -35,6 +43,8 @@
         <div>Gesture: <span id="gesture" style="font-weight:bold;">-</span></div>
     </div>
 
+    <div id="debug-display">● 3Dモデル表示中</div>
+
     <div id="loading-ui">
         <p id="loading-text">AIモデルを読み込み中...</p>
         <button id="start-btn" style="display:none;">カメラを許可してARをスタート</button>
@@ -49,13 +59,14 @@
         const gestureText = document.getElementById('gesture');
         const loadingUi = document.getElementById('loading-ui');
         const loadingText = document.getElementById('loading-text');
+        // 【追加】要素の取得
+        const debugDisplay = document.getElementById('debug-display');
 
         let gestureRecognizer;
         let scene, camera, renderer;
         
         // --- カスタムモデル用の変数 ---
         let customModel = null;
-        // モデルの基本サイズ。ravjaa.glbの大きさに合わせて、大きすぎる・小さすぎる場合はここを調整してください
         const MODEL_BASE_SCALE = 30; 
         
         const ALPHA = 0.3;
@@ -102,21 +113,20 @@
 
             renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true });
             renderer.setSize(width, height);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 負荷軽減
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-            // --- ライトの追加（これがないと3Dモデルが真っ黒になります） ---
+            // ライトの追加
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
             const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
             directionalLight.position.set(1, 1, 1).normalize();
             scene.add(directionalLight);
 
-            // --- GLBモデルの読み込み ---
+            // GLBモデルの読み込み
             const loader = new THREE.GLTFLoader();
-            // index.htmlと同じ階層にある ravjaa.glb を読み込む
             loader.load('ravjaa.glb', (gltf) => {
                 customModel = gltf.scene;
-                customModel.visible = false; // 最初は非表示
+                customModel.visible = false; 
                 customModel.scale.set(MODEL_BASE_SCALE, MODEL_BASE_SCALE, MODEL_BASE_SCALE);
                 scene.add(customModel);
             }, undefined, (error) => {
@@ -216,7 +226,6 @@
                     const width = window.innerWidth;
                     const height = window.innerHeight;
                     
-                    // モデルが読み込み完了している場合のみ処理を行う
                     if (customModel) {
                         customModel.position.x = (smoothX - 0.5) * width;
                         customModel.position.y = (0.5 - smoothY) * height;
@@ -245,9 +254,12 @@
                     prevX = null; prevY = null;
                 }
 
-                // 表示されている間はモデルを回転させる
+                // 【追加・変更】3Dモデルの表示状態に応じてデバッグUIを切り替える
                 if (customModel && customModel.visible) {
                     customModel.rotation.y += 0.02;
+                    debugDisplay.style.display = "block"; // モデルが表示中ならUIを出す
+                } else {
+                    debugDisplay.style.display = "none";  // 非表示ならUIを隠す
                 }
 
                 renderer.render(scene, camera);
