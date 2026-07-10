@@ -3,606 +3,250 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Monitor Recognizer</title>
+    <title>mediapipeAR - Test</title>
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background-color: #0d0f12;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            user-select: none;
-            -webkit-user-select: none;
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #webcam, #webgl-canvas {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover;
         }
-        #canvasOutput, #webgl-canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            object-fit: cover;
+        #webgl-canvas { pointer-events: none; z-index: 10; }
+        #ui-layer {
+            position: absolute; z-index: 20; color: white; top: 20px; left: 20px;
+            background: rgba(0,0,0,0.6); padding: 12px; border-radius: 8px; pointer-events: none;
+            font-size: 14px; line-height: 1.5; max-width: 80vw;
         }
-        #canvasOutput { z-index: 5; }
-        #webgl-canvas { z-index: 10; pointer-events: none; }
-        
-        /* 画面中央の点線ターゲット枠 */
-        #target-reticle {
-            position: absolute;
-            top: 20vh;
-            left: 20vw;
-            width: 60vw;
-            height: 60vh;
-            border: 2px dashed rgba(255, 255, 255, 0.4);
-            border-radius: 12px;
-            z-index: 50;
-            pointer-events: none;
-            box-sizing: border-box;
-            transition: all 0.3s ease;
-            display: none; /* 稼働開始時にJSで表示 */
+        #loading-ui {
+            position: absolute; z-index: 30; color: white; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center;
+            padding: 20px; box-sizing: border-box; text-align: center;
         }
-        /* モニターがはまった（ロックオン）時のスタイル */
-        #target-reticle.lock-m1 {
-            border: 4px solid #12b886;
-            box-shadow: 0 0 20px rgba(18, 184, 134, 0.4);
-            background: rgba(18, 184, 134, 0.03);
-        }
-        #target-reticle.lock-m2 {
-            border: 4px solid #228be6;
-            box-shadow: 0 0 20px rgba(34, 139, 230, 0.4);
-            background: rgba(34, 139, 230, 0.03);
-        }
-
-        #dashboard {
-            position: absolute;
-            z-index: 100;
-            top: 16px;
-            left: 16px;
-            right: 16px;
-            background: rgba(18, 22, 28, 0.88);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 14px;
-            padding: 16px;
-            color: #ffffff;
-            font-size: 13px;
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            max-height: 25vh;
-            overflow-y: auto;
-        }
-        .section-title {
-            font-weight: 700;
-            color: #4dabf7;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            letter-spacing: 1.2px;
-            border-bottom: 1px solid rgba(77, 171, 247, 0.25);
-            padding-bottom: 4px;
-            font-size: 11px;
-        }
-        .grid-container {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 12px;
-        }
-        .status-item {
-            background: rgba(255, 255, 255, 0.04);
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.03);
-        }
-        .status-val {
-            font-family: monospace;
-            font-size: 15px;
-            font-weight: 700;
-            margin-top: 4px;
-        }
-        #console-log {
-            grid-column: span 2;
-            background: #07080a;
-            color: #40c057;
-            font-family: monospace;
-            padding: 10px;
-            border-radius: 6px;
-            height: 60px;
-            overflow-y: auto;
-            font-size: 11px;
-            white-space: pre-wrap;
-            border: 1px solid rgba(64, 192, 87, 0.2);
-            box-sizing: border-box;
-        }
-        #setup-screen {
-            position: absolute;
-            z-index: 200;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: radial-gradient(circle at center, #1c2331 0%, #090b11 100%);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            color: #ffffff;
-            text-align: center;
-            padding: 24px;
-            box-sizing: border-box;
-        }
-        .app-card {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 20px;
-            padding: 40px;
-            max-width: 540px;
-            width: 100%;
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            box-sizing: border-box;
-        }
-        h1 {
-            margin: 0 0 10px 0;
-            font-size: 26px;
-            letter-spacing: -0.5px;
-            font-weight: 800;
-            background: linear-gradient(45deg, #3bc9db, #9775fa);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .description {
-            color: #909296;
-            font-size: 13px;
-            line-height: 1.6;
-            margin-bottom: 35px;
-            text-align: left;
-            background: rgba(0,0,0,0.2);
-            padding: 15px;
-            border-radius: 8px;
-            border-left: 3px solid #228be6;
-        }
-        .progress-bar-container {
-            width: 100%;
-            background-color: rgba(255, 255, 255, 0.08);
-            height: 10px;
-            border-radius: 5px;
-            margin-bottom: 24px;
-            overflow: hidden;
-            display: none;
-        }
-        .progress-bar-fill {
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, #228be6, #12b886);
-            border-radius: 5px;
-            transition: width 0.15s ease-out;
-        }
-        .action-btn {
-            background: linear-gradient(135deg, #228be6 0%, #1c7ed6 100%);
-            background-color: #1c7ed6;
-            color: #ffffff;
-            border: none;
-            padding: 18px 32px;
-            font-size: 15px;
-            font-weight: 700;
-            border-radius: 10px;
-            cursor: pointer;
-            box-shadow: 0 5px 20px rgba(28, 126, 214, 0.35);
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            width: 100%;
-            box-sizing: border-box;
-            letter-spacing: 0.5px;
-        }
-        .action-btn:disabled {
-            background: #343a40 !important;
-            color: #868e96;
-            cursor: not-allowed;
-            box-shadow: none;
-        }
-        #inference-hud {
-            position: absolute;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 120;
-            background: rgba(10, 12, 16, 0.9);
-            padding: 14px 32px;
-            border-radius: 40px;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            color: #ffffff;
-            font-size: 16px;
-            font-weight: 700;
-            text-align: center;
-            pointer-events: none;
-            display: none;
-            min-width: 280px;
-        }
+        button { padding: 14px 28px; font-size: 16px; border-radius: 5px; border: none; cursor: pointer; background: #007bff; color: white; font-weight: bold; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-    <video id="webcam" autoplay playsinline muted style="display:none;"></video>
-    <canvas id="canvasOutput"></canvas>
+    <video id="webcam" autoplay playsinline muted></video>
     <canvas id="webgl-canvas"></canvas>
-    
-    <div id="target-reticle"></div>
 
-    <div id="dashboard" style="display: none;">
-        <div class="grid-container">
-            <div class="status-item" style="grid-column: span 2;">
-                <div class="section-title">Deep Learning Matrix Core</div>
-                <div>Runtime Status: <span id="engine-status" style="color:#12b886; font-weight:bold;">STANDBY</span></div>
-            </div>
-            <div class="status-item">
-                <div class="section-title">Object Class Classification</div>
-                <div id="predict-class" class="status-val" style="color:#fab005;">Analyzing...</div>
-            </div>
-            <div class="status-item">
-                <div class="section-title">Softmax Probability</div>
-                <div id="predict-score" class="status-val" style="color:#fd7e14;">0.00%</div>
-            </div>
-            <div class="status-item" style="grid-column: span 2;">
-                <div class="section-title">Neural Network Loss / Accuracy Logs</div>
-                <div id="matrix-stats" style="font-family: monospace; font-size:11px; color:#74c0fc; line-height: 1.4;">Ready.</div>
-            </div>
-            <div id="console-log">Initializing runtime framework environment...</div>
-        </div>
+    <div id="ui-layer">
+        <div>Status: <span id="status" style="color:#00ff00;">Initializing AI...</span></div>
+        <div>Gesture: <span id="gesture" style="font-weight:bold;">-</span></div>
     </div>
 
-    <div id="setup-screen">
-        <div class="app-card">
-            <h1>Advanced AI Monitor Recognizer</h1>
-            <div class="description">
-                <strong>【AR 演出アップデート】</strong><br>
-                画面中央の点線枠にモニターをはめ込むと、ロックオン演出とともに、モニターの中心から3Dワイヤーフレームキューブが出現する空間演出を実装しました。
-            </div>
-            <div class="progress-bar-container" id="p-container">
-                <div class="progress-bar-fill" id="p-fill"></div>
-            </div>
-            <div id="status-label" style="margin-bottom: 24px; font-size: 13px; color: #a6a7ab; font-family: monospace;">
-                System Core Integration Pipeline Standby.
-            </div>
-            <button class="action-btn" id="master-btn">計20枚の画像で高速AI学習を開始</button>
-        </div>
+    <div id="loading-ui">
+        <p id="loading-text">AIモデルを読み込み中...</p>
+        <button id="start-btn" style="display:none;">カメラを許可してARをスタート</button>
     </div>
 
-    <div id="inference-hud">CORE PREPARING</div>
+    <script type="module">
+        import { GestureRecognizer, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
-    <script>
-        const domVideo = document.getElementById('webcam');
-        const domCanvasOut = document.getElementById('canvasOutput');
-        const domCtxOut = domCanvasOut.getContext('2d');
-        const btnMasterCtrl = document.getElementById('master-btn');
-        const lblSystemStatus = document.getElementById('status-label');
-        const containerProgress = document.getElementById('p-container');
-        const fillProgress = document.getElementById('p-fill');
-        const panelDashboard = document.getElementById('dashboard');
-        const hudInference = document.getElementById('inference-hud');
-        const areaConsoleLog = document.getElementById('console-log');
-        const domReticle = document.getElementById('target-reticle');
+        const video = document.getElementById('webcam');
+        const startBtn = document.getElementById('start-btn');
+        const statusText = document.getElementById('status');
+        const gestureText = document.getElementById('gesture');
+        const loadingUi = document.getElementById('loading-ui');
+        const loadingText = document.getElementById('loading-text');
+
+        let gestureRecognizer;
+        let scene, camera, renderer, boxMesh;
         
-        const viewEngineState = document.getElementById('engine-status');
-        const viewPredictClass = document.getElementById('predict-class');
-        const viewPredictScore = document.getElementById('predict-score');
-        const viewMatrixStats = document.getElementById('matrix-stats');
+        const ALPHA = 0.3;
+        let prevX = null;
+        let prevY = null;
 
-        const SystemWeightsConfig = {
-            inputLayerNodes: 1280,
-            hiddenLayerNodesAlpha: 256,
-            hiddenLayerNodesBeta: 64,
-            outputClasses: 2,
-            learningRate: 0.0002,
-            trainingEpochs: 40,
-            batchSize: 4,
-            minActivationScore: 0.85, // 誤認識を防ぐため少し判定を厳しめに設定
-            smoothingFilterFactor: 0.25
-        };
+        const gestureHistory = [];
+        const HISTORY_LIMIT = 5;
 
-        const GlobalState = {
-            baseFeatureExtractor: null,
-            trainedClassifier: null,
-            isEngineReady: false,
-            imageStorage: { monitor1: [], monitor2: [] },
-            targetSamplesPerClass: 10,
-            resolvedVideoWidth: 1280,
-            resolvedVideoHeight: 720,
-            frameLoopId: null
-        };
+        let isDinoVisible = false;
+        let spawnStartTime = 0;
+        const SPAWN_DURATION = 300; 
 
-        let glScene, glCamera, glRenderer, glTrackingBox;
-
-        function pushLog(text) {
-            const timestamp = new Date();
-            const timeFormat = timestamp.toTimeString().split(' ')[0];
-            const structuredMessage = "[" + timeFormat + "] " + text;
-            areaConsoleLog.innerText = structuredMessage + "\n" + areaConsoleLog.innerText;
-        }
-
-        function advanceUIProgress(statusMessage, percentage) {
-            lblSystemStatus.innerText = statusMessage;
-            if (percentage !== null) {
-                containerProgress.style.display = 'block';
-                fillProgress.style.width = percentage + '%';
-            }
-        }
-
-        function fetchImageBlobElement(srcPath) {
-            return new Promise((resolve, reject) => {
-                const imageElement = new Image();
-                imageElement.crossOrigin = 'anonymous';
-                imageElement.src = srcPath + "?timestamp=" + Date.now();
-                imageElement.onload = () => resolve(imageElement);
-                imageElement.onerror = (error) => reject(error);
-            });
-        }
-
-        async function runDatasetIngestionModule() {
-            pushLog("データロードを開始...");
-            const grandTotalSteps = GlobalState.targetSamplesPerClass * 2;
-            let currentProcessedCount = 0;
-
-            for (let i = 1; i <= 10; i++) {
-                const formattedIndex = i < 10 ? "0" + i : "" + i;
-                let ext = (i >= 8) ? ".JPG" : ".jpg";
-                const path = "dataset/monitor1_" + formattedIndex + ext;
-                try {
-                    const loadedImg = await fetchImageBlobElement(path);
-                    GlobalState.imageStorage.monitor1.push(loadedImg);
-                } catch (err) {
-                    pushLog("Failed: " + path);
-                }
-                currentProcessedCount++;
-                advanceUIProgress("Loading monitor1: " + i + " / 10", Math.floor((currentProcessedCount / grandTotalSteps) * 100));
-            }
-
-            for (let i = 1; i <= 10; i++) {
-                const formattedIndex = i < 10 ? "0" + i : "" + i;
-                let ext = (i === 1) ? ".jpg" : ".JPG";
-                const path = "dataset/monitor2_" + formattedIndex + ext;
-                try {
-                    const loadedImg = await fetchImageBlobElement(path);
-                    GlobalState.imageStorage.monitor2.push(loadedImg);
-                } catch (err) {
-                    pushLog("Failed: " + path);
-                }
-                currentProcessedCount++;
-                advanceUIProgress("Loading monitor2: " + i + " / 10", Math.floor((currentProcessedCount / grandTotalSteps) * 100));
-            }
-        }
-
-        function compileCustomNeuralClassifier() {
-            const customSequentialModel = tf.sequential();
-            customSequentialModel.add(tf.layers.dense({
-                units: SystemWeightsConfig.hiddenLayerNodesAlpha,
-                activation: 'relu',
-                inputShape: [SystemWeightsConfig.inputLayerNodes],
-                kernelInitializer: 'varianceScaling'
-            }));
-            customSequentialModel.add(tf.layers.dropout({ rate: 0.2 }));
-            customSequentialModel.add(tf.layers.dense({
-                units: SystemWeightsConfig.hiddenLayerNodesBeta,
-                activation: 'relu',
-                kernelInitializer: 'varianceScaling'
-            }));
-            customSequentialModel.add(tf.layers.dense({
-                units: SystemWeightsConfig.outputClasses,
-                activation: 'softmax',
-                kernelInitializer: 'varianceScaling'
-            }));
-
-            customSequentialModel.compile({
-                optimizer: tf.train.adam(SystemWeightsConfig.learningRate),
-                loss: 'categoricalCrossentropy',
-                metrics: ['accuracy']
-            });
-            GlobalState.trainedClassifier = customSequentialModel;
-        }
-
-        function getFeatureActivationTensor(inputTensor) {
-            return GlobalState.baseFeatureExtractor.predict(inputTensor);
-        }
-
-        async function runModelTrainingOptimization() {
-            advanceUIProgress("ベースAIを直接起動中...", 30);
-            
-            const modelUrl = 'https://tfhub.dev/google/tfjs-model/imagenet/mobilenet_v2_100_224/feature_vector/3/default/1';
-            GlobalState.baseFeatureExtractor = await tf.loadGraphModel(modelUrl, { fromTFHub: true });
-            
-            compileCustomNeuralClassifier();
-
-            const inputFeatureVectors = [];
-            const outputTargetLabels = [];
-
-            const extractFeaturesFromClassArray = (htmlImagesArray, targetClassId) => {
-                for (let i = 0; i < htmlImagesArray.length; i++) {
-                    tf.tidy(() => {
-                        const sourceTensor = tf.browser.fromPixels(htmlImagesArray[i]);
-                        const scaledTensor = tf.image.resizeBilinear(sourceTensor, [224, 224]);
-                        const normalizedTensor = scaledTensor.toFloat().div(255.0);
-                        const batchedTensor = normalizedTensor.expandDims(0);
-                        
-                        const featureActivation = getFeatureActivationTensor(batchedTensor);
-                        const reshapedFeature = featureActivation.reshape([SystemWeightsConfig.inputLayerNodes]);
-                        
-                        inputFeatureVectors.push(reshapedFeature.clone());
-                        const oneHotArray = [0, 0];
-                        oneHotArray[targetClassId] = 1;
-                        outputTargetLabels.push(tf.tensor1d(oneHotArray));
-                    });
-                }
-            };
-
-            advanceUIProgress("特徴量マトリクスに変換中...", 60);
-            await tf.nextFrame();
-
-            extractFeaturesFromClassArray(GlobalState.imageStorage.monitor1, 0);
-            extractFeaturesFromClassArray(GlobalState.imageStorage.monitor2, 1);
-
-            const trainingX = tf.stack(inputFeatureVectors);
-            const trainingY = tf.stack(outputTargetLabels);
-
-            inputFeatureVectors.forEach(t => t.dispose());
-            outputTargetLabels.forEach(t => t.dispose());
-
-            await tf.nextFrame();
-
-            await GlobalState.trainedClassifier.fit(trainingX, trainingY, {
-                epochs: SystemWeightsConfig.trainingEpochs,
-                batchSize: SystemWeightsConfig.batchSize,
-                shuffle: true,
-                callbacks: {
-                    onEpochEnd: async (currentEpoch, stepLogs) => {
-                        viewMatrixStats.innerText = "Epoch: " + (currentEpoch + 1) + " / " + SystemWeightsConfig.trainingEpochs + 
-                                                    "\nLoss: " + stepLogs.loss.toFixed(6) + 
-                                                    "\nAccuracy: " + (stepLogs.acc * 100).toFixed(2) + "%";
-                        await tf.nextFrame();
-                    }
-                }
-            });
-
-            trainingX.dispose();
-            trainingY.dispose();
-            GlobalState.isEngineReady = true;
-        }
-
-        function setupArGraphicsEnvironment() {
-            const viewportWidth = window.innerWidth;
-            const viewportHeight = window.innerHeight;
-            glScene = new THREE.Scene();
-            glCamera = new THREE.OrthographicCamera(-viewportWidth/2, viewportWidth/2, viewportHeight/2, -viewportHeight/2, 0.1, 2000);
-            glCamera.position.z = 600;
-
-            glRenderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true, antialias: true });
-            glRenderer.setSize(viewportWidth, viewportHeight);
-            glRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-            // 点線枠の中心から出現する、少し大きめのスタイリッシュな3D立方体
-            const geometryCube = new THREE.BoxGeometry(200, 200, 200);
-            const edgeInstance = new THREE.EdgesGeometry(geometryCube);
-            const materialLine = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 4 });
-            glTrackingBox = new THREE.LineSegments(edgeInstance, materialLine);
-            
-            // 最初は非表示、中央にはまった時だけ飛び出させる
-            glTrackingBox.visible = false;
-            glScene.add(glTrackingBox);
-        }
-
-        async function runHardwareCameraLinkage() {
-            const mediaConstraints = { video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
-            const streamCapture = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-            domVideo.srcObject = streamCapture;
-            await new Promise((resolve) => {
-                domVideo.onloadedmetadata = () => {
-                    GlobalState.resolvedVideoWidth = domVideo.videoWidth || 1280;
-                    GlobalState.resolvedVideoHeight = domVideo.videoHeight || 720;
-                    resolve();
-                };
-            });
-            await domVideo.play();
-            domCanvasOut.width = GlobalState.resolvedVideoWidth;
-            domCanvasOut.height = GlobalState.resolvedVideoHeight;
-        }
-
-        async function runRealtimeInferenceThreadLoop() {
-            if (domVideo.readyState >= domVideo.HAVE_CURRENT_DATA) {
-                // 1. カメラ映像全体をキャンバスに描画
-                domCtxOut.drawImage(domVideo, 0, 0, GlobalState.resolvedVideoWidth, GlobalState.resolvedVideoHeight);
-
-                // 2. 画面中央の「ターゲット枠内（20%〜80%の範囲）」のピクセルだけを切り抜いてAIに認識させる
-                const softmaxArrayOutput = tf.tidy(() => {
-                    const canvasFramePixels = tf.browser.fromPixels(domCanvasOut);
-                    
-                    // カメラ映像から中央の枠に該当する部分をクロップ([startY, startX, endY, endX])
-                    const cropBoxes = tf.tensor2d([0.2, 0.2, 0.8, 0.8], [1, 4]);
-                    const boxIndices = tf.tensor1d([0], 'int32');
-                    const croppedFrame = tf.image.cropAndResize(canvasFramePixels.expandDims(0), cropBoxes, boxIndices, [224, 224]);
-                    
-                    const normalizedFrame = croppedFrame.squeeze().toFloat().div(255.0);
-                    const singleBatchFrame = normalizedFrame.expandDims(0);
-                    
-                    const activationFeatures = getFeatureActivationTensor(singleBatchFrame);
-                    const flatFeatures = activationFeatures.reshape([SystemWeightsConfig.inputLayerNodes]);
-                    return GlobalState.trainedClassifier.predict(flatFeatures.expandDims(0)).dataSync();
-                });
-
-                let topClassId = 0, topProbabilityScore = -1;
-                for (let i = 0; i < softmaxArrayOutput.length; i++) {
-                    if (softmaxArrayOutput[i] > topProbabilityScore) {
-                        topProbabilityScore = softmaxArrayOutput[i];
-                        topClassId = i;
-                    }
-                }
-
-                const visualConfidence = (topProbabilityScore * 100).toFixed(2) + "%";
-                const humanReadableClasses = ["モニター1", "モニター2"];
-                viewPredictClass.innerText = humanReadableClasses[topClassId];
-                viewPredictScore.innerText = visualConfidence;
-
-                // 3. 点線枠の中にモニターがしっかり収まった（基準スコアを超えた）場合の処理
-                if (topProbabilityScore > SystemWeightsConfig.minActivationScore) {
-                    hudInference.innerText = humanReadableClasses[topClassId] + " ロックオン (" + visualConfidence + ")";
-                    hudInference.style.color = topClassId === 0 ? "#12b886" : "#228be6";
-                    
-                    // HTMLの点線枠の色を変えて実線化（ロックオン演出）
-                    domReticle.className = topClassId === 0 ? 'lock-m1' : 'lock-m2';
-
-                    // 3D空間のど真ん中にキューブを出現させて滑らかに回転
-                    glTrackingBox.position.x = 0;
-                    glTrackingBox.position.y = 0;
-                    
-                    if(glTrackingBox.material) {
-                        glTrackingBox.material.color.setHex(topClassId === 0 ? 0x12b886 : 0x228be6);
-                    }
-                    glTrackingBox.visible = true;
-                    glTrackingBox.rotation.x += 0.02;
-                    glTrackingBox.rotation.y += 0.03;
-                    glTrackingBox.rotation.z += 0.01;
-                } else {
-                    // 枠内にはまっていない時は通常の点線状態に戻し、キューブを消す
-                    hudInference.innerText = "点線枠内にモニターを合わせてください";
-                    hudInference.style.color = "#adb5bd";
-                    domReticle.className = '';
-                    glTrackingBox.visible = false;
-                }
-                glRenderer.render(glScene, glCamera);
-            }
-            GlobalState.frameLoopId = requestAnimationFrame(runRealtimeInferenceThreadLoop);
-        }
-
-        async function startSystemMasterPipeline() {
-            btnMasterCtrl.disabled = true;
+        // AI初期化
+        async function initMediaPipe() {
             try {
-                viewEngineState.innerText = "LOADING";
-                await runDatasetIngestionModule();
-                viewEngineState.innerText = "TRAINING";
-                await runModelTrainingOptimization();
-                setupArGraphicsEnvironment();
-                await runHardwareCameraLinkage();
-
-                document.getElementById('setup-screen').style.display = 'none';
-                panelDashboard.style.display = 'block';
-                hudInference.style.display = 'block';
-                domReticle.style.display = 'block'; // スキャン開始と同時に点線枠を表示
-                viewEngineState.innerText = "RUNNING";
-                runRealtimeInferenceThreadLoop();
-            } catch (ex) {
-                alert("起動エラー:\n" + ex.message);
-                btnMasterCtrl.disabled = false;
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+                );
+                gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO"
+                });
+                
+                loadingText.style.display = "none";
+                startBtn.style.display = "block";
+                statusText.innerText = "Ready";
+            } catch (err) {
+                console.error(err);
+                loadingText.innerHTML = `AIの初期化に失敗しました。<br><br><span style="color:#ff6b6b; font-size:13px;">Error: ${err.message}</span>`;
             }
         }
 
-        btnMasterCtrl.addEventListener('click', startSystemMasterPipeline);
+        // Three.js初期化
+        function initThree() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            scene = new THREE.Scene();
+            camera = new THREE.OrthographicCamera(-width / 2, width / 2, height / 2, -height / 2, 0.1, 1000);
+            camera.position.z = 10;
 
-        window.addEventListener('resize', () => {
-            if (glRenderer && glCamera) {
-                const currentW = window.innerWidth, currentH = window.innerHeight;
-                glCamera.left = -currentW / 2; glCamera.right = currentW / 2;
-                glCamera.top = currentH / 2; glCamera.bottom = -currentH / 2;
-                glCamera.updateProjectionMatrix();
-                glRenderer.setSize(currentW, currentH);
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 負荷軽減
+
+            const geometry = new THREE.BoxGeometry(60, 60, 60);
+            const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+            boxMesh = new THREE.Mesh(geometry, material);
+            boxMesh.visible = false;
+            scene.add(boxMesh);
+        }
+
+        // スタートボタン
+        startBtn.addEventListener('click', async () => {
+            loadingUi.style.display = 'none';
+            initThree();
+
+            try {
+                // 解像度要求を少し緩めて互換性をアップ
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } } 
+                });
+                video.srcObject = stream;
+                
+                // スマホブラウザ向けに動画再生を確実にキックする設定
+                video.setAttribute('autoplay', '');
+                video.setAttribute('muted', '');
+                video.setAttribute('playsinline', '');
+                
+                await video.play();
+                
+                statusText.innerText = "Tracking Active";
+                // ループを開始
+                requestAnimationFrame(renderLoop);
+            } catch (err) {
+                console.error("カメラ起動エラー:", err);
+                alert("カメラの起動に失敗しました: " + err.message);
             }
         });
+
+        // 毎フレームのループ処理（エラー対策強化版）
+        function renderLoop() {
+            try {
+                // ビデオのデータがまだ来ていない場合は、ループを止めずに次のフレームを待つ
+                if (video.readyState < video.HAVE_CURRENT_DATA) {
+                    gestureText.innerText = "Waiting video data...";
+                    requestAnimationFrame(renderLoop);
+                    return;
+                }
+
+                // AI判定が初期化されていない場合の安全弁
+                if (!gestureRecognizer) {
+                    gestureText.innerText = "AI not ready in loop";
+                    requestAnimationFrame(renderLoop);
+                    return;
+                }
+
+                const now = performance.now();
+                
+                // 【重要】MediaPipeの解析処理（ここがエラーで落ちやすいので対策）
+                let results;
+                try {
+                    results = gestureRecognizer.recognizeForVideo(video, now);
+                } catch (aiErr) {
+                    // 解析に失敗した場合、画面にエラーを出してループを維持する
+                    gestureText.innerHTML = `<span style="color:#ff6b6b;">AI Error: ${aiErr.message}</span>`;
+                    requestAnimationFrame(renderLoop);
+                    return;
+                }
+
+                let currentGesture = "None";
+                let handDetected = false;
+
+                if (results && results.gestures && results.gestures.length > 0) {
+                    currentGesture = results.gestures[0][0].categoryName;
+                    handDetected = true;
+                }
+
+                // 正常に動いていれば、ここで None、Open_Palm、Closed_Fist のいずれかに書き換わる
+                gestureText.innerText = currentGesture;
+
+                // デバウンス処理
+                gestureHistory.push(currentGesture);
+                if (gestureHistory.length > HISTORY_LIMIT) { gestureHistory.shift(); }
+
+                let fistCount = 0;
+                let maxContinuousFist = 0;
+                for (let i = 0; i < gestureHistory.length; i++) {
+                    if (gestureHistory[i] === "Closed_Fist") {
+                        fistCount++;
+                        maxContinuousFist = Math.max(maxContinuousFist, fistCount);
+                    } else {
+                        fistCount = 0;
+                    }
+                }
+
+                // 位置更新と描画
+                if (handDetected && results.landmarks && results.landmarks.length > 0) {
+                    const landmark9 = results.landmarks[0][9];
+                    let targetX = landmark9.x;
+                    let targetY = landmark9.y;
+
+                    if (prevX === null || prevY === null) {
+                        prevX = targetX; prevY = targetY;
+                    }
+                    const smoothX = ALPHA * targetX + (1 - ALPHA) * prevX;
+                    const smoothY = ALPHA * targetY + (1 - ALPHA) * prevY;
+                    prevX = smoothX; prevY = smoothY;
+
+                    const width = window.innerWidth;
+                    const height = window.innerHeight;
+                    
+                    boxMesh.position.x = (smoothX - 0.5) * width;
+                    boxMesh.position.y = (0.5 - smoothY) * height;
+
+                    if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
+                        isDinoVisible = true;
+                        boxMesh.visible = true;
+                        spawnStartTime = now;
+                    } else if (isDinoVisible && currentGesture === "Closed_Fist") {
+                        isDinoVisible = false;
+                        boxMesh.visible = false;
+                    }
+
+                    if (isDinoVisible) {
+                        const elapsed = now - spawnStartTime;
+                        const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
+                        boxMesh.scale.set(progress, progress, progress);
+                    }
+
+                } else {
+                    isDinoVisible = false;
+                    boxMesh.visible = false;
+                    prevX = null; prevY = null;
+                }
+
+                if (boxMesh.visible) {
+                    boxMesh.rotation.x += 0.01;
+                    boxMesh.rotation.y += 0.01;
+                }
+
+                renderer.render(scene, camera);
+
+            } catch (globalErr) {
+                // ループ内のその他の想定外エラーをキャッチして画面に表示
+                gestureText.innerHTML = `<span style="color:#ff6b6b;">Loop Error: ${globalErr.message}</span>`;
+            }
+
+            // 何があっても次のフレームのループを呼び出す
+            requestAnimationFrame(renderLoop);
+        }
+        
+
+        initMediaPipe();
     </script>
 </body>
 </html>
