@@ -56,15 +56,18 @@
         const MODEL_URL_PARAM = new URLSearchParams(window.location.search).get('model');
         const MODEL_SCALE = 40;
 
-        function getModelUrl() {
+        function getModelCandidates() {
             if (MODEL_URL_PARAM) {
-                return MODEL_URL_PARAM;
+                return [MODEL_URL_PARAM];
             }
-            const candidates = [
-                new URL('./ravjaa.glb', window.location.href).href,
-                new URL('./assets/ravjaa.glb', window.location.href).href
+
+            const base = window.location.href;
+            return [
+                new URL('./ravjaa.glb', base).href,
+                new URL('./assets/ravjaa.glb', base).href,
+                './ravjaa.glb',
+                './assets/ravjaa.glb'
             ];
-            return candidates[0];
         }
         
         const ALPHA = 0.3;
@@ -120,24 +123,38 @@
             scene.add(directionalLight);
 
             const loader = new THREE.GLTFLoader();
-            const modelUrl = getModelUrl();
-            statusText.innerText = `3Dモデルを読み込み中... (${modelUrl})`;
-            loader.load(
-                modelUrl,
-                (gltf) => {
-                    activeModel = gltf.scene;
-                    activeModel.visible = false;
-                    activeModel.scale.set(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
-                    activeModel.position.set(0, 0, 0);
-                    scene.add(activeModel);
-                    statusText.innerText = '3Dモデル読込成功';
-                },
-                undefined,
-                (error) => {
-                    console.error('GLBの読み込みに失敗しました:', error);
-                    statusText.innerHTML = `<span style="color:#ff6b6b;">GLBの読み込みに失敗しました<br>${modelUrl}</span>`;
-                }
-            );
+            const candidates = getModelCandidates();
+            let attemptIndex = 0;
+
+            function tryLoadModel() {
+                const modelUrl = candidates[attemptIndex];
+                statusText.innerText = `3Dモデルを読み込み中... (${modelUrl})`;
+
+                loader.load(
+                    modelUrl,
+                    (gltf) => {
+                        activeModel = gltf.scene;
+                        activeModel.visible = false;
+                        activeModel.scale.set(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
+                        activeModel.position.set(0, 0, 0);
+                        scene.add(activeModel);
+                        statusText.innerText = '3Dモデル読込成功';
+                    },
+                    undefined,
+                    (error) => {
+                        attemptIndex += 1;
+                        if (attemptIndex < candidates.length) {
+                            console.warn(`GLB読み込み失敗: ${modelUrl} -> 次の候補を試します`);
+                            tryLoadModel();
+                        } else {
+                            console.error('GLBの読み込みに失敗しました:', error);
+                            statusText.innerHTML = `<span style="color:#ff6b6b;">GLBの読み込みに失敗しました<br>${candidates.join('<br>')}</span>`;
+                        }
+                    }
+                );
+            }
+
+            tryLoadModel();
         }
 
         // スタートボタン
