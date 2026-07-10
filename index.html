@@ -23,7 +23,6 @@
         button { padding: 14px 28px; font-size: 16px; border-radius: 5px; border: none; cursor: pointer; background: #007bff; color: white; font-weight: bold; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
 
@@ -51,24 +50,7 @@
         const loadingText = document.getElementById('loading-text');
 
         let gestureRecognizer;
-        let scene, camera, renderer, activeModel;
-
-        const MODEL_URL_PARAM = new URLSearchParams(window.location.search).get('model');
-        const MODEL_SCALE = 40;
-
-        function getModelCandidates() {
-            if (MODEL_URL_PARAM) {
-                return [MODEL_URL_PARAM];
-            }
-
-            const base = window.location.href;
-            return [
-                new URL('./ravjaa.glb', base).href,
-                new URL('./assets/ravjaa.glb', base).href,
-                './ravjaa.glb',
-                './assets/ravjaa.glb'
-            ];
-        }
+        let scene, camera, renderer, boxMesh;
         
         const ALPHA = 0.3;
         let prevX = null;
@@ -114,47 +96,13 @@
 
             renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), alpha: true });
             renderer.setSize(width, height);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 負荷軽減
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
-            scene.add(ambientLight);
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
-            directionalLight.position.set(1, 1, 1).normalize();
-            scene.add(directionalLight);
-
-            const loader = new THREE.GLTFLoader();
-            const candidates = getModelCandidates();
-            let attemptIndex = 0;
-
-            function tryLoadModel() {
-                const modelUrl = candidates[attemptIndex];
-                statusText.innerText = `3Dモデルを読み込み中... (${modelUrl})`;
-
-                loader.load(
-                    modelUrl,
-                    (gltf) => {
-                        activeModel = gltf.scene;
-                        activeModel.visible = false;
-                        activeModel.scale.set(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
-                        activeModel.position.set(0, 0, 0);
-                        scene.add(activeModel);
-                        statusText.innerText = '3Dモデル読込成功';
-                    },
-                    undefined,
-                    (error) => {
-                        attemptIndex += 1;
-                        if (attemptIndex < candidates.length) {
-                            console.warn(`GLB読み込み失敗: ${modelUrl} -> 次の候補を試します`);
-                            tryLoadModel();
-                        } else {
-                            console.error('GLBの読み込みに失敗しました:', error);
-                            statusText.innerHTML = `<span style="color:#ff6b6b;">GLBの読み込みに失敗しました<br>${candidates.join('<br>')}</span>`;
-                        }
-                    }
-                );
-            }
-
-            tryLoadModel();
+            const geometry = new THREE.BoxGeometry(60, 60, 60);
+            const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+            boxMesh = new THREE.Mesh(geometry, material);
+            boxMesh.visible = false;
+            scene.add(boxMesh);
         }
 
         // スタートボタン
@@ -256,34 +204,34 @@
 
                     const width = window.innerWidth;
                     const height = window.innerHeight;
-
-                    if (activeModel) {
-                        activeModel.position.x = (smoothX - 0.5) * width;
-                        activeModel.position.y = (0.5 - smoothY) * height;
-                        activeModel.position.z = 0;
-                    }
+                    
+                    boxMesh.position.x = (smoothX - 0.5) * width;
+                    boxMesh.position.y = (0.5 - smoothY) * height;
 
                     if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
                         isDinoVisible = true;
-                        if (activeModel) activeModel.visible = true;
+                        boxMesh.visible = true;
                         spawnStartTime = now;
                     } else if (isDinoVisible && currentGesture === "Closed_Fist") {
                         isDinoVisible = false;
-                        if (activeModel) activeModel.visible = false;
+                        boxMesh.visible = false;
                     }
 
-                    if (isDinoVisible && activeModel) {
+                    if (isDinoVisible) {
                         const elapsed = now - spawnStartTime;
                         const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
-                        const currentScale = MODEL_SCALE * progress;
-                        activeModel.scale.set(currentScale, currentScale, currentScale);
-                        activeModel.rotation.y += 0.02;
+                        boxMesh.scale.set(progress, progress, progress);
                     }
 
                 } else {
                     isDinoVisible = false;
-                    if (activeModel) activeModel.visible = false;
+                    boxMesh.visible = false;
                     prevX = null; prevY = null;
+                }
+
+                if (boxMesh.visible) {
+                    boxMesh.rotation.x += 0.01;
+                    boxMesh.rotation.y += 0.01;
                 }
 
                 renderer.render(scene, camera);
