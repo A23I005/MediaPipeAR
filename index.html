@@ -53,8 +53,19 @@
         let gestureRecognizer;
         let scene, camera, renderer, activeModel;
 
-        const MODEL_URL = new URLSearchParams(window.location.search).get('model') || './ravjaa.glb';
+        const MODEL_URL_PARAM = new URLSearchParams(window.location.search).get('model');
         const MODEL_SCALE = 40;
+
+        function getModelUrl() {
+            if (MODEL_URL_PARAM) {
+                return MODEL_URL_PARAM;
+            }
+            const candidates = [
+                new URL('./assets/ravjaa.glb', window.location.href).href,
+                new URL('./ravjaa.glb', window.location.href).href
+            ];
+            return candidates[0];
+        }
         
         const ALPHA = 0.3;
         let prevX = null;
@@ -109,8 +120,10 @@
             scene.add(directionalLight);
 
             const loader = new THREE.GLTFLoader();
+            const modelUrl = getModelUrl();
+            statusText.innerText = `3Dモデルを読み込み中... (${modelUrl})`;
             loader.load(
-                MODEL_URL,
+                modelUrl,
                 (gltf) => {
                     activeModel = gltf.scene;
                     activeModel.visible = false;
@@ -122,7 +135,7 @@
                 undefined,
                 (error) => {
                     console.error('GLBの読み込みに失敗しました:', error);
-                    statusText.innerHTML = '<span style="color:#ff6b6b;">GLBの読み込みに失敗しました</span>';
+                    statusText.innerHTML = `<span style="color:#ff6b6b;">GLBの読み込みに失敗しました<br>${modelUrl}</span>`;
                 }
             );
         }
