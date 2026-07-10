@@ -124,12 +124,18 @@
 
             // GLBモデルの読み込み
             const loader = new THREE.GLTFLoader();
+            statusText.innerText = "3Dモデルを読み込み中..."; // ★追加
+            
             loader.load('ravjaa.glb', (gltf) => {
                 customModel = gltf.scene;
                 customModel.visible = false; 
                 customModel.scale.set(MODEL_BASE_SCALE, MODEL_BASE_SCALE, MODEL_BASE_SCALE);
                 scene.add(customModel);
+                statusText.innerText = "モデル読込成功！ Tracking Active"; // ★追加
             }, undefined, (error) => {
+                // ★追加：スマホの画面上に赤文字でエラーを直接表示する
+                statusText.innerHTML = `<span style="color:red; font-weight:bold;">モデル読込エラー: サーバー環境で実行していますか？</span>`;
+                alert("3Dモデルの読み込みに失敗しました。\nファイル名が正しいか、サーバー経由で開いているか確認してください。");
                 console.error('モデルの読み込みエラー:', error);
             });
         }
