@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>mediapipeAR - Test</title>
+    <title>mediapipeAR - Custom GLB</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         #webcam, #webgl-canvas {
@@ -23,6 +23,7 @@
         button { padding: 14px 28px; font-size: 16px; border-radius: 5px; border: none; cursor: pointer; background: #007bff; color: white; font-weight: bold; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
 
@@ -50,7 +51,12 @@
         const loadingText = document.getElementById('loading-text');
 
         let gestureRecognizer;
-        let scene, camera, renderer, boxMesh;
+        let scene, camera, renderer;
+        
+        // --- カスタムモデル用の変数 ---
+        let customModel = null;
+        // モデルの基本サイズ。ravjaa.glbの大きさに合わせて、大きすぎる・小さすぎる場合はここを調整してください
+        const MODEL_BASE_SCALE = 30; 
         
         const ALPHA = 0.3;
         let prevX = null;
@@ -98,11 +104,24 @@
             renderer.setSize(width, height);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 負荷軽減
 
-            const geometry = new THREE.BoxGeometry(60, 60, 60);
-            const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
-            boxMesh = new THREE.Mesh(geometry, material);
-            boxMesh.visible = false;
-            scene.add(boxMesh);
+            // --- ライトの追加（これがないと3Dモデルが真っ黒になります） ---
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(1, 1, 1).normalize();
+            scene.add(directionalLight);
+
+            // --- GLBモデルの読み込み ---
+            const loader = new THREE.GLTFLoader();
+            // index.htmlと同じ階層にある ravjaa.glb を読み込む
+            loader.load('ravjaa.glb', (gltf) => {
+                customModel = gltf.scene;
+                customModel.visible = false; // 最初は非表示
+                customModel.scale.set(MODEL_BASE_SCALE, MODEL_BASE_SCALE, MODEL_BASE_SCALE);
+                scene.add(customModel);
+            }, undefined, (error) => {
+                console.error('モデルの読み込みエラー:', error);
+            });
         }
 
         // スタートボタン
@@ -111,13 +130,11 @@
             initThree();
 
             try {
-                // 解像度要求を少し緩めて互換性をアップ
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } } 
                 });
                 video.srcObject = stream;
                 
-                // スマホブラウザ向けに動画再生を確実にキックする設定
                 video.setAttribute('autoplay', '');
                 video.setAttribute('muted', '');
                 video.setAttribute('playsinline', '');
@@ -125,7 +142,6 @@
                 await video.play();
                 
                 statusText.innerText = "Tracking Active";
-                // ループを開始
                 requestAnimationFrame(renderLoop);
             } catch (err) {
                 console.error("カメラ起動エラー:", err);
@@ -133,17 +149,15 @@
             }
         });
 
-        // 毎フレームのループ処理（エラー対策強化版）
+        // 毎フレームのループ処理
         function renderLoop() {
             try {
-                // ビデオのデータがまだ来ていない場合は、ループを止めずに次のフレームを待つ
                 if (video.readyState < video.HAVE_CURRENT_DATA) {
                     gestureText.innerText = "Waiting video data...";
                     requestAnimationFrame(renderLoop);
                     return;
                 }
 
-                // AI判定が初期化されていない場合の安全弁
                 if (!gestureRecognizer) {
                     gestureText.innerText = "AI not ready in loop";
                     requestAnimationFrame(renderLoop);
@@ -152,12 +166,10 @@
 
                 const now = performance.now();
                 
-                // 【重要】MediaPipeの解析処理（ここがエラーで落ちやすいので対策）
                 let results;
                 try {
                     results = gestureRecognizer.recognizeForVideo(video, now);
                 } catch (aiErr) {
-                    // 解析に失敗した場合、画面にエラーを出してループを維持する
                     gestureText.innerHTML = `<span style="color:#ff6b6b;">AI Error: ${aiErr.message}</span>`;
                     requestAnimationFrame(renderLoop);
                     return;
@@ -171,7 +183,6 @@
                     handDetected = true;
                 }
 
-                // 正常に動いていれば、ここで None、Open_Palm、Closed_Fist のいずれかに書き換わる
                 gestureText.innerText = currentGesture;
 
                 // デバウンス処理
@@ -205,47 +216,49 @@
                     const width = window.innerWidth;
                     const height = window.innerHeight;
                     
-                    boxMesh.position.x = (smoothX - 0.5) * width;
-                    boxMesh.position.y = (0.5 - smoothY) * height;
+                    // モデルが読み込み完了している場合のみ処理を行う
+                    if (customModel) {
+                        customModel.position.x = (smoothX - 0.5) * width;
+                        customModel.position.y = (0.5 - smoothY) * height;
 
-                    if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
-                        isDinoVisible = true;
-                        boxMesh.visible = true;
-                        spawnStartTime = now;
-                    } else if (isDinoVisible && currentGesture === "Closed_Fist") {
-                        isDinoVisible = false;
-                        boxMesh.visible = false;
-                    }
+                        if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
+                            isDinoVisible = true;
+                            customModel.visible = true;
+                            spawnStartTime = now;
+                        } else if (isDinoVisible && currentGesture === "Closed_Fist") {
+                            isDinoVisible = false;
+                            customModel.visible = false;
+                        }
 
-                    if (isDinoVisible) {
-                        const elapsed = now - spawnStartTime;
-                        const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
-                        boxMesh.scale.set(progress, progress, progress);
+                        // ポップアップアニメーション
+                        if (isDinoVisible) {
+                            const elapsed = now - spawnStartTime;
+                            const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
+                            const currentScale = MODEL_BASE_SCALE * progress;
+                            customModel.scale.set(currentScale, currentScale, currentScale);
+                        }
                     }
 
                 } else {
                     isDinoVisible = false;
-                    boxMesh.visible = false;
+                    if (customModel) customModel.visible = false;
                     prevX = null; prevY = null;
                 }
 
-                if (boxMesh.visible) {
-                    boxMesh.rotation.x += 0.01;
-                    boxMesh.rotation.y += 0.01;
+                // 表示されている間はモデルを回転させる
+                if (customModel && customModel.visible) {
+                    customModel.rotation.y += 0.02;
                 }
 
                 renderer.render(scene, camera);
 
             } catch (globalErr) {
-                // ループ内のその他の想定外エラーをキャッチして画面に表示
                 gestureText.innerHTML = `<span style="color:#ff6b6b;">Loop Error: ${globalErr.message}</span>`;
             }
 
-            // 何があっても次のフレームのループを呼び出す
             requestAnimationFrame(renderLoop);
         }
         
-
         initMediaPipe();
     </script>
 </body>
