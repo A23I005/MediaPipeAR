@@ -24,6 +24,34 @@
         }
         #canvasOutput { z-index: 5; }
         #webgl-canvas { z-index: 10; pointer-events: none; }
+        
+        /* 画面中央の点線ターゲット枠 */
+        #target-reticle {
+            position: absolute;
+            top: 20vh;
+            left: 20vw;
+            width: 60vw;
+            height: 60vh;
+            border: 2px dashed rgba(255, 255, 255, 0.4);
+            border-radius: 12px;
+            z-index: 50;
+            pointer-events: none;
+            box-sizing: border-box;
+            transition: all 0.3s ease;
+            display: none; /* 稼働開始時にJSで表示 */
+        }
+        /* モニターがはまった（ロックオン）時のスタイル */
+        #target-reticle.lock-m1 {
+            border: 4px solid #12b886;
+            box-shadow: 0 0 20px rgba(18, 184, 134, 0.4);
+            background: rgba(18, 184, 134, 0.03);
+        }
+        #target-reticle.lock-m2 {
+            border: 4px solid #228be6;
+            box-shadow: 0 0 20px rgba(34, 139, 230, 0.4);
+            background: rgba(34, 139, 230, 0.03);
+        }
+
         #dashboard {
             position: absolute;
             z-index: 100;
@@ -38,7 +66,7 @@
             font-size: 13px;
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            max-height: 32vh;
+            max-height: 25vh;
             overflow-y: auto;
         }
         .section-title {
@@ -75,7 +103,7 @@
             font-family: monospace;
             padding: 10px;
             border-radius: 6px;
-            height: 70px;
+            height: 60px;
             overflow-y: auto;
             font-size: 11px;
             white-space: pre-wrap;
@@ -112,10 +140,14 @@
             box-sizing: border-box;
         }
         h1 {
-            margin: 0 0 12px 0;
-            font-size: 24px;
+            margin: 0 0 10px 0;
+            font-size: 26px;
+            letter-spacing: -0.5px;
             font-weight: 800;
-            color: #e3fafc;
+            background: linear-gradient(45deg, #3bc9db, #9775fa);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
         .description {
             color: #909296;
@@ -146,6 +178,7 @@
         }
         .action-btn {
             background: linear-gradient(135deg, #228be6 0%, #1c7ed6 100%);
+            background-color: #1c7ed6;
             color: #ffffff;
             border: none;
             padding: 18px 32px;
@@ -153,13 +186,17 @@
             font-weight: 700;
             border-radius: 10px;
             cursor: pointer;
+            box-shadow: 0 5px 20px rgba(28, 126, 214, 0.35);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             width: 100%;
             box-sizing: border-box;
+            letter-spacing: 0.5px;
         }
         .action-btn:disabled {
             background: #343a40 !important;
             color: #868e96;
             cursor: not-allowed;
+            box-shadow: none;
         }
         #inference-hud {
             position: absolute;
@@ -188,6 +225,8 @@
     <video id="webcam" autoplay playsinline muted style="display:none;"></video>
     <canvas id="canvasOutput"></canvas>
     <canvas id="webgl-canvas"></canvas>
+    
+    <div id="target-reticle"></div>
 
     <div id="dashboard" style="display: none;">
         <div class="grid-container">
@@ -215,8 +254,8 @@
         <div class="app-card">
             <h1>Advanced AI Monitor Recognizer</h1>
             <div class="description">
-                <strong>【ベースAIクラッシュ完全対策版】</strong><br>
-                不具合の多い外部MobileNetラッパーを廃止。Googleホストの純粋なMobileNetV2（特徴量1024次元抽出レイヤー）を直接直列ロードすることで、クラッシュ問題を根絶しました。
+                <strong>【AR 演出アップデート】</strong><br>
+                画面中央の点線枠にモニターをはめ込むと、ロックオン演出とともに、モニターの中心から3Dワイヤーフレームキューブが出現する空間演出を実装しました。
             </div>
             <div class="progress-bar-container" id="p-container">
                 <div class="progress-bar-fill" id="p-fill"></div>
@@ -241,6 +280,7 @@
         const panelDashboard = document.getElementById('dashboard');
         const hudInference = document.getElementById('inference-hud');
         const areaConsoleLog = document.getElementById('console-log');
+        const domReticle = document.getElementById('target-reticle');
         
         const viewEngineState = document.getElementById('engine-status');
         const viewPredictClass = document.getElementById('predict-class');
@@ -248,14 +288,14 @@
         const viewMatrixStats = document.getElementById('matrix-stats');
 
         const SystemWeightsConfig = {
-            inputLayerNodes: 1024, // MobileNetV2の特徴量出力サイズにジャスト固定
+            inputLayerNodes: 1280,
             hiddenLayerNodesAlpha: 256,
             hiddenLayerNodesBeta: 64,
             outputClasses: 2,
             learningRate: 0.0002,
             trainingEpochs: 40,
             batchSize: 4,
-            minActivationScore: 0.80,
+            minActivationScore: 0.85, // 誤認識を防ぐため少し判定を厳しめに設定
             smoothingFilterFactor: 0.25
         };
 
@@ -359,16 +399,13 @@
             GlobalState.trainedClassifier = customSequentialModel;
         }
 
-        // Google公式ホストからダイレクトロードしたモデルから特徴量（1024次元）をノーバグで引き抜く関数
         function getFeatureActivationTensor(inputTensor) {
-            // [1, 224, 224, 3] のテンソルを流し込み、途中の1024次元特徴量を抽出
             return GlobalState.baseFeatureExtractor.predict(inputTensor);
         }
 
         async function runModelTrainingOptimization() {
             advanceUIProgress("ベースAIを直接起動中...", 30);
             
-            // クラッシュの元であるmobilenetラッパーを使わず、Google公式のMobileNetV2特徴量抽出モデルをTFJSで直ロード
             const modelUrl = 'https://tfhub.dev/google/tfjs-model/imagenet/mobilenet_v2_100_224/feature_vector/3/default/1';
             GlobalState.baseFeatureExtractor = await tf.loadGraphModel(modelUrl, { fromTFHub: true });
             
@@ -382,7 +419,6 @@
                     tf.tidy(() => {
                         const sourceTensor = tf.browser.fromPixels(htmlImagesArray[i]);
                         const scaledTensor = tf.image.resizeBilinear(sourceTensor, [224, 224]);
-                        // 直呼び出しモデル用に [0, 1] に正規化
                         const normalizedTensor = scaledTensor.toFloat().div(255.0);
                         const batchedTensor = normalizedTensor.expandDims(0);
                         
@@ -441,10 +477,13 @@
             glRenderer.setSize(viewportWidth, viewportHeight);
             glRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-            const geometryCube = new THREE.BoxGeometry(160, 160, 160);
+            // 点線枠の中心から出現する、少し大きめのスタイリッシュな3D立方体
+            const geometryCube = new THREE.BoxGeometry(200, 200, 200);
             const edgeInstance = new THREE.EdgesGeometry(geometryCube);
-            const materialLine = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 3 });
+            const materialLine = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 4 });
             glTrackingBox = new THREE.LineSegments(edgeInstance, materialLine);
+            
+            // 最初は非表示、中央にはまった時だけ飛び出させる
             glTrackingBox.visible = false;
             glScene.add(glTrackingBox);
         }
@@ -465,24 +504,21 @@
             domCanvasOut.height = GlobalState.resolvedVideoHeight;
         }
 
-        function calculateScreenGeometricCenter() {
-            const vW = GlobalState.resolvedVideoWidth;
-            const vH = GlobalState.resolvedVideoHeight;
-            return {
-                x: Math.floor(vW * 0.20), y: Math.floor(vH * 0.20),
-                width: Math.floor(vW * 0.60), height: Math.floor(vH * 0.60),
-                midpointX: Math.floor(vW / 2), midpointY: Math.floor(vH / 2)
-            };
-        }
-
         async function runRealtimeInferenceThreadLoop() {
             if (domVideo.readyState >= domVideo.HAVE_CURRENT_DATA) {
+                // 1. カメラ映像全体をキャンバスに描画
                 domCtxOut.drawImage(domVideo, 0, 0, GlobalState.resolvedVideoWidth, GlobalState.resolvedVideoHeight);
 
+                // 2. 画面中央の「ターゲット枠内（20%〜80%の範囲）」のピクセルだけを切り抜いてAIに認識させる
                 const softmaxArrayOutput = tf.tidy(() => {
                     const canvasFramePixels = tf.browser.fromPixels(domCanvasOut);
-                    const processedFrame = tf.image.resizeBilinear(canvasFramePixels, [224, 224]);
-                    const normalizedFrame = processedFrame.toFloat().div(255.0);
+                    
+                    // カメラ映像から中央の枠に該当する部分をクロップ([startY, startX, endY, endX])
+                    const cropBoxes = tf.tensor2d([0.2, 0.2, 0.8, 0.8], [1, 4]);
+                    const boxIndices = tf.tensor1d([0], 'int32');
+                    const croppedFrame = tf.image.cropAndResize(canvasFramePixels.expandDims(0), cropBoxes, boxIndices, [224, 224]);
+                    
+                    const normalizedFrame = croppedFrame.squeeze().toFloat().div(255.0);
                     const singleBatchFrame = normalizedFrame.expandDims(0);
                     
                     const activationFeatures = getFeatureActivationTensor(singleBatchFrame);
@@ -503,29 +539,30 @@
                 viewPredictClass.innerText = humanReadableClasses[topClassId];
                 viewPredictScore.innerText = visualConfidence;
 
+                // 3. 点線枠の中にモニターがしっかり収まった（基準スコアを超えた）場合の処理
                 if (topProbabilityScore > SystemWeightsConfig.minActivationScore) {
-                    hudInference.innerText = humanReadableClasses[topClassId] + " 検出 (" + visualConfidence + ")";
+                    hudInference.innerText = humanReadableClasses[topClassId] + " ロックオン (" + visualConfidence + ")";
                     hudInference.style.color = topClassId === 0 ? "#12b886" : "#228be6";
                     
-                    const bounds = calculateScreenGeometricCenter();
-                    domCtxOut.strokeStyle = topClassId === 0 ? "#12b886" : "#228be6";
-                    domCtxOut.lineWidth = 6;
-                    domCtxOut.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+                    // HTMLの点線枠の色を変えて実線化（ロックオン演出）
+                    domReticle.className = topClassId === 0 ? 'lock-m1' : 'lock-m2';
 
-                    const windowW = window.innerWidth, windowH = window.innerHeight;
-                    const computedThreeX = ((bounds.midpointX / GlobalState.resolvedVideoWidth) - 0.5) * windowW;
-                    const computedThreeY = (0.5 - (bounds.midpointY / GlobalState.resolvedVideoHeight)) * windowH;
-
-                    glTrackingBox.position.x = SystemWeightsConfig.smoothingFilterFactor * computedThreeX + (1.0 - SystemWeightsConfig.smoothingFilterFactor) * glTrackingBox.position.x;
-                    glTrackingBox.position.y = SystemWeightsConfig.smoothingFilterFactor * computedThreeY + (1.0 - SystemWeightsConfig.smoothingFilterFactor) * glTrackingBox.position.y;
+                    // 3D空間のど真ん中にキューブを出現させて滑らかに回転
+                    glTrackingBox.position.x = 0;
+                    glTrackingBox.position.y = 0;
                     
-                    if(glTrackingBox.material) glTrackingBox.material.color.setHex(topClassId === 0 ? 0x12b886 : 0x228be6);
+                    if(glTrackingBox.material) {
+                        glTrackingBox.material.color.setHex(topClassId === 0 ? 0x12b886 : 0x228be6);
+                    }
                     glTrackingBox.visible = true;
                     glTrackingBox.rotation.x += 0.02;
-                    glTrackingBox.rotation.y += 0.02;
+                    glTrackingBox.rotation.y += 0.03;
+                    glTrackingBox.rotation.z += 0.01;
                 } else {
-                    hudInference.innerText = "モニターをスキャン中...";
+                    // 枠内にはまっていない時は通常の点線状態に戻し、キューブを消す
+                    hudInference.innerText = "点線枠内にモニターを合わせてください";
                     hudInference.style.color = "#adb5bd";
+                    domReticle.className = '';
                     glTrackingBox.visible = false;
                 }
                 glRenderer.render(glScene, glCamera);
@@ -546,6 +583,7 @@
                 document.getElementById('setup-screen').style.display = 'none';
                 panelDashboard.style.display = 'block';
                 hudInference.style.display = 'block';
+                domReticle.style.display = 'block'; // スキャン開始と同時に点線枠を表示
                 viewEngineState.innerText = "RUNNING";
                 runRealtimeInferenceThreadLoop();
             } catch (ex) {
