@@ -67,18 +67,45 @@
         
         // --- カスタムモデル用の変数 ---
         let customModel = null;
-        const MODEL_BASE_SCALE = 30; 
+        const MODEL_BASE_SCALE = 24;
+        const MODEL_SPAWN_SCALE = 0.5;
         
         const ALPHA = 0.3;
         let prevX = null;
         let prevY = null;
 
-        const gestureHistory = [];
-        const HISTORY_LIMIT = 5;
-
-        let isDinoVisible = false;
+        let lastGesture = null;
+        let isModelVisible = false;
         let spawnStartTime = 0;
-        const SPAWN_DURATION = 300; 
+        const SPAWN_DURATION = 220;
+
+        function getBaseUrl() {
+            const url = new URL(window.location.href);
+            const pathname = url.pathname.replace(/\/+$|index\.html$/i, '');
+            const normalizedPath = pathname === '' ? '/' : `${pathname}/`;
+            return `${url.origin}${normalizedPath}`;
+        }
+
+        function getModelUrl() {
+            return new URL('ravjaa.glb', getBaseUrl()).href;
+        }
+
+        function getPalmCenter(landmarks) {
+            const palmIndices = [0, 5, 9, 13, 17];
+            const sum = palmIndices.reduce((acc, index) => {
+                const point = landmarks[index];
+                if (!point) return acc;
+                acc.x += point.x;
+                acc.y += point.y;
+                return acc;
+            }, { x: 0, y: 0 });
+
+            const count = palmIndices.filter((index) => landmarks[index]).length;
+            return {
+                x: sum.x / count,
+                y: sum.y / count
+            };
+        }
 
         // AI初期化
         async function initMediaPipe() {
@@ -124,18 +151,22 @@
 
             // GLBモデルの読み込み
             const loader = new THREE.GLTFLoader();
-            statusText.innerText = "3Dモデルを読み込み中..."; // ★追加
-            
-            loader.load('ravjaa.glb', (gltf) => {
+            statusText.innerText = "3Dモデルを読み込み中...";
+
+            if (window.location.protocol === 'file:') {
+                statusText.innerHTML = '<span style="color:#ffdd57;">ファイル直接読み込みではGLBが制限されるため、HTTPサーバで開いてください。</span>';
+            }
+
+            loader.load(getModelUrl(), (gltf) => {
                 customModel = gltf.scene;
-                customModel.visible = false; 
+                customModel.visible = false;
                 customModel.scale.set(MODEL_BASE_SCALE, MODEL_BASE_SCALE, MODEL_BASE_SCALE);
+                customModel.position.set(0, 0, 0);
+                customModel.rotation.set(0, Math.PI, 0);
                 scene.add(customModel);
-                statusText.innerText = "モデル読込成功！ Tracking Active"; // ★追加
+                statusText.innerText = "モデル読込成功！ Tracking Active";
             }, undefined, (error) => {
-                // ★追加：スマホの画面上に赤文字でエラーを直接表示する
-                statusText.innerHTML = `<span style="color:red; font-weight:bold;">モデル読込エラー: サーバー環境で実行していますか？</span>`;
-                alert("3Dモデルの読み込みに失敗しました。\nファイル名が正しいか、サーバー経由で開いているか確認してください。");
+                statusText.innerHTML = '<span style="color:red; font-weight:bold;">モデル読込エラー: サーバー環境で実行していますか？</span>';
                 console.error('モデルの読み込みエラー:', error);
             });
         }
@@ -194,78 +225,67 @@
                 let currentGesture = "None";
                 let handDetected = false;
 
-                if (results && results.gestures && results.gestures.length > 0) {
-                    currentGesture = results.gestures[0][0].categoryName;
+                if (results && results.gestures && results.gestures.length > 0 && results.gestures[0].length > 0) {
+                    currentGesture = results.gestures[0][0].categoryName || "None";
                     handDetected = true;
                 }
 
                 gestureText.innerText = currentGesture;
 
-                // デバウンス処理
-                gestureHistory.push(currentGesture);
-                if (gestureHistory.length > HISTORY_LIMIT) { gestureHistory.shift(); }
-
-                let fistCount = 0;
-                let maxContinuousFist = 0;
-                for (let i = 0; i < gestureHistory.length; i++) {
-                    if (gestureHistory[i] === "Closed_Fist") {
-                        fistCount++;
-                        maxContinuousFist = Math.max(maxContinuousFist, fistCount);
-                    } else {
-                        fistCount = 0;
-                    }
-                }
-
-                // 位置更新と描画
                 if (handDetected && results.landmarks && results.landmarks.length > 0) {
-                    const landmark9 = results.landmarks[0][9];
-                    let targetX = landmark9.x;
-                    let targetY = landmark9.y;
+                    const handLandmarks = results.landmarks[0];
+                    const targetPoint = getPalmCenter(handLandmarks);
 
                     if (prevX === null || prevY === null) {
-                        prevX = targetX; prevY = targetY;
+                        prevX = targetPoint.x;
+                        prevY = targetPoint.y;
                     }
-                    const smoothX = ALPHA * targetX + (1 - ALPHA) * prevX;
-                    const smoothY = ALPHA * targetY + (1 - ALPHA) * prevY;
-                    prevX = smoothX; prevY = smoothY;
+                    const smoothX = ALPHA * targetPoint.x + (1 - ALPHA) * prevX;
+                    const smoothY = ALPHA * targetPoint.y + (1 - ALPHA) * prevY;
+                    prevX = smoothX;
+                    prevY = smoothY;
 
                     const width = window.innerWidth;
                     const height = window.innerHeight;
-                    
+
                     if (customModel) {
                         customModel.position.x = (smoothX - 0.5) * width;
                         customModel.position.y = (0.5 - smoothY) * height;
+                        customModel.position.z = 0;
 
-                        if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
-                            isDinoVisible = true;
+                        const gestureChangedToOpenPalm = currentGesture === "Open_Palm" && lastGesture !== "Open_Palm";
+                        const gestureChangedToFist = (currentGesture === "Closed_Fist" || currentGesture === "None") && lastGesture !== currentGesture;
+
+                        if (gestureChangedToOpenPalm) {
+                            isModelVisible = true;
                             customModel.visible = true;
                             spawnStartTime = now;
-                        } else if (isDinoVisible && currentGesture === "Closed_Fist") {
-                            isDinoVisible = false;
+                        } else if (gestureChangedToFist) {
+                            isModelVisible = false;
                             customModel.visible = false;
                         }
 
-                        // ポップアップアニメーション
-                        if (isDinoVisible) {
+                        if (isModelVisible) {
                             const elapsed = now - spawnStartTime;
                             const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
-                            const currentScale = MODEL_BASE_SCALE * progress;
+                            const currentScale = MODEL_BASE_SCALE * (MODEL_SPAWN_SCALE + (1 - MODEL_SPAWN_SCALE) * progress);
                             customModel.scale.set(currentScale, currentScale, currentScale);
+                            customModel.rotation.y += 0.02;
                         }
                     }
-
                 } else {
-                    isDinoVisible = false;
+                    isModelVisible = false;
                     if (customModel) customModel.visible = false;
-                    prevX = null; prevY = null;
+                    prevX = null;
+                    prevY = null;
                 }
 
-                // 【追加・変更】3Dモデルの表示状態に応じてデバッグUIを切り替える
+                lastGesture = currentGesture;
+
                 if (customModel && customModel.visible) {
-                    customModel.rotation.y += 0.02;
-                    debugDisplay.style.display = "block"; // モデルが表示中ならUIを出す
+                    debugDisplay.style.display = "block";
                 } else {
-                    debugDisplay.style.display = "none";  // 非表示ならUIを隠す
+                    debugDisplay.style.display = "none";
                 }
 
                 renderer.render(scene, camera);
