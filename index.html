@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>mediapipeAR - Custom GLB (Debug)</title>
+    <title>mediapipeAR - Test</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         #webcam, #webgl-canvas {
@@ -14,14 +14,6 @@
             position: absolute; z-index: 20; color: white; top: 20px; left: 20px;
             background: rgba(0,0,0,0.6); padding: 12px; border-radius: 8px; pointer-events: none;
             font-size: 14px; line-height: 1.5; max-width: 80vw;
-        }
-        /* 【追加】デバッグ表示用のスタイル（画面右上） */
-        #debug-display {
-            position: absolute; z-index: 25; top: 20px; right: 20px;
-            background: rgba(0, 0, 0, 0.8); color: #39ff14; padding: 10px 20px;
-            border-radius: 5px; font-weight: bold; font-size: 16px;
-            border: 2px solid #39ff14; pointer-events: none;
-            display: none; /* 初期状態は非表示 */
         }
         #loading-ui {
             position: absolute; z-index: 30; color: white; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -43,8 +35,6 @@
         <div>Gesture: <span id="gesture" style="font-weight:bold;">-</span></div>
     </div>
 
-    <div id="debug-display">● 3Dモデル表示中</div>
-
     <div id="loading-ui">
         <p id="loading-text">AIモデルを読み込み中...</p>
         <button id="start-btn" style="display:none;">カメラを許可してARをスタート</button>
@@ -59,46 +49,23 @@
         const gestureText = document.getElementById('gesture');
         const loadingUi = document.getElementById('loading-ui');
         const loadingText = document.getElementById('loading-text');
-        // 【追加】要素の取得
-        const debugDisplay = document.getElementById('debug-display');
 
         let gestureRecognizer;
-        let scene, camera, renderer;
-        
-        // --- カスタムモデル用の変数 ---
-        let customModel = null;
-        const MODEL_BASE_SCALE = 24;
-        const MODEL_SPAWN_SCALE = 0.5;
+        let scene, camera, renderer, activeModel;
+
+        const MODEL_URL = new URLSearchParams(window.location.search).get('model') || './ravjaa.glb';
+        const MODEL_SCALE = 40;
         
         const ALPHA = 0.3;
         let prevX = null;
         let prevY = null;
 
-        let lastGesture = null;
-        let isModelVisible = false;
+        const gestureHistory = [];
+        const HISTORY_LIMIT = 5;
+
+        let isDinoVisible = false;
         let spawnStartTime = 0;
-        const SPAWN_DURATION = 220;
-
-        function getModelUrl() {
-            return './assets/ravjaa.glb';
-        }
-
-        function getPalmCenter(landmarks) {
-            const palmIndices = [0, 5, 9, 13, 17];
-            const sum = palmIndices.reduce((acc, index) => {
-                const point = landmarks[index];
-                if (!point) return acc;
-                acc.x += point.x;
-                acc.y += point.y;
-                return acc;
-            }, { x: 0, y: 0 });
-
-            const count = palmIndices.filter((index) => landmarks[index]).length;
-            return {
-                x: sum.x / count,
-                y: sum.y / count
-            };
-        }
+        const SPAWN_DURATION = 300; 
 
         // AI初期化
         async function initMediaPipe() {
@@ -135,34 +102,29 @@
             renderer.setSize(width, height);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-            // ライトの追加
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
             scene.add(ambientLight);
             const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
             directionalLight.position.set(1, 1, 1).normalize();
             scene.add(directionalLight);
 
-            // GLBモデルの読み込み
             const loader = new THREE.GLTFLoader();
-            statusText.innerText = "3Dモデルを読み込み中...";
-
-            if (window.location.protocol === 'file:') {
-                statusText.innerHTML = '<span style="color:#ffdd57;">ファイル直接読み込みではGLBが制限されるため、HTTPサーバで開いてください。</span>';
-            }
-
-            const modelUrl = getModelUrl();
-            loader.load(modelUrl, (gltf) => {
-                customModel = gltf.scene;
-                customModel.visible = false;
-                customModel.scale.set(MODEL_BASE_SCALE, MODEL_BASE_SCALE, MODEL_BASE_SCALE);
-                customModel.position.set(0, 0, 0);
-                customModel.rotation.set(0, Math.PI, 0);
-                scene.add(customModel);
-                statusText.innerText = "モデル読込成功！ Tracking Active";
-            }, undefined, (error) => {
-                statusText.innerHTML = '<span style="color:red; font-weight:bold;">モデル読込エラー: GLBファイルが見つかりません。公開ディレクトリに ravjaa.glb があるか確認してください。</span>';
-                console.error('モデルの読み込みエラー:', error);
-            });
+            loader.load(
+                MODEL_URL,
+                (gltf) => {
+                    activeModel = gltf.scene;
+                    activeModel.visible = false;
+                    activeModel.scale.set(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
+                    activeModel.position.set(0, 0, 0);
+                    scene.add(activeModel);
+                    statusText.innerText = '3Dモデル読込成功';
+                },
+                undefined,
+                (error) => {
+                    console.error('GLBの読み込みに失敗しました:', error);
+                    statusText.innerHTML = '<span style="color:#ff6b6b;">GLBの読み込みに失敗しました</span>';
+                }
+            );
         }
 
         // スタートボタン
@@ -171,11 +133,13 @@
             initThree();
 
             try {
+                // 解像度要求を少し緩めて互換性をアップ
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } } 
                 });
                 video.srcObject = stream;
                 
+                // スマホブラウザ向けに動画再生を確実にキックする設定
                 video.setAttribute('autoplay', '');
                 video.setAttribute('muted', '');
                 video.setAttribute('playsinline', '');
@@ -183,6 +147,7 @@
                 await video.play();
                 
                 statusText.innerText = "Tracking Active";
+                // ループを開始
                 requestAnimationFrame(renderLoop);
             } catch (err) {
                 console.error("カメラ起動エラー:", err);
@@ -190,15 +155,17 @@
             }
         });
 
-        // 毎フレームのループ処理
+        // 毎フレームのループ処理（エラー対策強化版）
         function renderLoop() {
             try {
+                // ビデオのデータがまだ来ていない場合は、ループを止めずに次のフレームを待つ
                 if (video.readyState < video.HAVE_CURRENT_DATA) {
                     gestureText.innerText = "Waiting video data...";
                     requestAnimationFrame(renderLoop);
                     return;
                 }
 
+                // AI判定が初期化されていない場合の安全弁
                 if (!gestureRecognizer) {
                     gestureText.innerText = "AI not ready in loop";
                     requestAnimationFrame(renderLoop);
@@ -207,10 +174,12 @@
 
                 const now = performance.now();
                 
+                // 【重要】MediaPipeの解析処理（ここがエラーで落ちやすいので対策）
                 let results;
                 try {
                     results = gestureRecognizer.recognizeForVideo(video, now);
                 } catch (aiErr) {
+                    // 解析に失敗した場合、画面にエラーを出してループを維持する
                     gestureText.innerHTML = `<span style="color:#ff6b6b;">AI Error: ${aiErr.message}</span>`;
                     requestAnimationFrame(renderLoop);
                     return;
@@ -219,78 +188,86 @@
                 let currentGesture = "None";
                 let handDetected = false;
 
-                if (results && results.gestures && results.gestures.length > 0 && results.gestures[0].length > 0) {
-                    currentGesture = results.gestures[0][0].categoryName || "None";
+                if (results && results.gestures && results.gestures.length > 0) {
+                    currentGesture = results.gestures[0][0].categoryName;
                     handDetected = true;
                 }
 
+                // 正常に動いていれば、ここで None、Open_Palm、Closed_Fist のいずれかに書き換わる
                 gestureText.innerText = currentGesture;
 
+                // デバウンス処理
+                gestureHistory.push(currentGesture);
+                if (gestureHistory.length > HISTORY_LIMIT) { gestureHistory.shift(); }
+
+                let fistCount = 0;
+                let maxContinuousFist = 0;
+                for (let i = 0; i < gestureHistory.length; i++) {
+                    if (gestureHistory[i] === "Closed_Fist") {
+                        fistCount++;
+                        maxContinuousFist = Math.max(maxContinuousFist, fistCount);
+                    } else {
+                        fistCount = 0;
+                    }
+                }
+
+                // 位置更新と描画
                 if (handDetected && results.landmarks && results.landmarks.length > 0) {
-                    const handLandmarks = results.landmarks[0];
-                    const targetPoint = getPalmCenter(handLandmarks);
+                    const landmark9 = results.landmarks[0][9];
+                    let targetX = landmark9.x;
+                    let targetY = landmark9.y;
 
                     if (prevX === null || prevY === null) {
-                        prevX = targetPoint.x;
-                        prevY = targetPoint.y;
+                        prevX = targetX; prevY = targetY;
                     }
-                    const smoothX = ALPHA * targetPoint.x + (1 - ALPHA) * prevX;
-                    const smoothY = ALPHA * targetPoint.y + (1 - ALPHA) * prevY;
-                    prevX = smoothX;
-                    prevY = smoothY;
+                    const smoothX = ALPHA * targetX + (1 - ALPHA) * prevX;
+                    const smoothY = ALPHA * targetY + (1 - ALPHA) * prevY;
+                    prevX = smoothX; prevY = smoothY;
 
                     const width = window.innerWidth;
                     const height = window.innerHeight;
 
-                    if (customModel) {
-                        customModel.position.x = (smoothX - 0.5) * width;
-                        customModel.position.y = (0.5 - smoothY) * height;
-                        customModel.position.z = 0;
-
-                        const gestureChangedToOpenPalm = currentGesture === "Open_Palm" && lastGesture !== "Open_Palm";
-                        const gestureChangedToFist = (currentGesture === "Closed_Fist" || currentGesture === "None") && lastGesture !== currentGesture;
-
-                        if (gestureChangedToOpenPalm) {
-                            isModelVisible = true;
-                            customModel.visible = true;
-                            spawnStartTime = now;
-                        } else if (gestureChangedToFist) {
-                            isModelVisible = false;
-                            customModel.visible = false;
-                        }
-
-                        if (isModelVisible) {
-                            const elapsed = now - spawnStartTime;
-                            const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
-                            const currentScale = MODEL_BASE_SCALE * (MODEL_SPAWN_SCALE + (1 - MODEL_SPAWN_SCALE) * progress);
-                            customModel.scale.set(currentScale, currentScale, currentScale);
-                            customModel.rotation.y += 0.02;
-                        }
+                    if (activeModel) {
+                        activeModel.position.x = (smoothX - 0.5) * width;
+                        activeModel.position.y = (0.5 - smoothY) * height;
+                        activeModel.position.z = 0;
                     }
-                } else {
-                    isModelVisible = false;
-                    if (customModel) customModel.visible = false;
-                    prevX = null;
-                    prevY = null;
-                }
 
-                lastGesture = currentGesture;
+                    if (!isDinoVisible && currentGesture === "Open_Palm" && maxContinuousFist >= 3) {
+                        isDinoVisible = true;
+                        if (activeModel) activeModel.visible = true;
+                        spawnStartTime = now;
+                    } else if (isDinoVisible && currentGesture === "Closed_Fist") {
+                        isDinoVisible = false;
+                        if (activeModel) activeModel.visible = false;
+                    }
 
-                if (customModel && customModel.visible) {
-                    debugDisplay.style.display = "block";
+                    if (isDinoVisible && activeModel) {
+                        const elapsed = now - spawnStartTime;
+                        const progress = Math.min(elapsed / SPAWN_DURATION, 1.0);
+                        const currentScale = MODEL_SCALE * progress;
+                        activeModel.scale.set(currentScale, currentScale, currentScale);
+                        activeModel.rotation.y += 0.02;
+                    }
+
                 } else {
-                    debugDisplay.style.display = "none";
+                    isDinoVisible = false;
+                    if (activeModel) activeModel.visible = false;
+                    prevX = null; prevY = null;
                 }
 
                 renderer.render(scene, camera);
 
             } catch (globalErr) {
+                // ループ内のその他の想定外エラーをキャッチして画面に表示
                 gestureText.innerHTML = `<span style="color:#ff6b6b;">Loop Error: ${globalErr.message}</span>`;
             }
 
+            // 何があっても次のフレームのループを呼び出す
             requestAnimationFrame(renderLoop);
         }
         
+
         initMediaPipe();
     </script>
 </body>
