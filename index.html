@@ -79,15 +79,8 @@
         let spawnStartTime = 0;
         const SPAWN_DURATION = 220;
 
-        function getBaseUrl() {
-            const url = new URL(window.location.href);
-            const pathname = url.pathname.replace(/\/+$|index\.html$/i, '');
-            const normalizedPath = pathname === '' ? '/' : `${pathname}/`;
-            return `${url.origin}${normalizedPath}`;
-        }
-
         function getModelUrl() {
-            return new URL('ravjaa.glb', getBaseUrl()).href;
+            return './assets/ravjaa.glb';
         }
 
         function getPalmCenter(landmarks) {
@@ -157,7 +150,8 @@
                 statusText.innerHTML = '<span style="color:#ffdd57;">ファイル直接読み込みではGLBが制限されるため、HTTPサーバで開いてください。</span>';
             }
 
-            loader.load(getModelUrl(), (gltf) => {
+            const modelUrl = getModelUrl();
+            loader.load(modelUrl, (gltf) => {
                 customModel = gltf.scene;
                 customModel.visible = false;
                 customModel.scale.set(MODEL_BASE_SCALE, MODEL_BASE_SCALE, MODEL_BASE_SCALE);
@@ -166,7 +160,7 @@
                 scene.add(customModel);
                 statusText.innerText = "モデル読込成功！ Tracking Active";
             }, undefined, (error) => {
-                statusText.innerHTML = '<span style="color:red; font-weight:bold;">モデル読込エラー: サーバー環境で実行していますか？</span>';
+                statusText.innerHTML = '<span style="color:red; font-weight:bold;">モデル読込エラー: GLBファイルが見つかりません。公開ディレクトリに ravjaa.glb があるか確認してください。</span>';
                 console.error('モデルの読み込みエラー:', error);
             });
         }
